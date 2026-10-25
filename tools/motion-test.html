@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><title>FreeCamRecord Motion Bench</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#101a2a}canvas{display:block;width:100%;height:100%}</style>
+<canvas id="scene"></canvas>
+<script>
+const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d', {alpha:false});
+let frames=0,start=performance.now(),last=start,intervals=[];
+let tone,beepSecond=-1,beeps=[];
+function resize(){canvas.width=Math.round(innerWidth*devicePixelRatio);canvas.height=Math.round(innerHeight*devicePixelRatio);}
+addEventListener('resize',resize);resize();
+window.motionBench={reset(){frames=0;intervals=[];beeps=[];beepSecond=-1;start=last=performance.now();},async startTone(){tone??=new AudioContext();await tone.resume();},stats(){return {frames,seconds:(performance.now()-start)/1000,sourceFps:frames*1000/(performance.now()-start),dpr:devicePixelRatio,innerWidth,innerHeight,outerWidth,outerHeight,screenX,screenY,intervals,beeps};}};
+addEventListener('pointerdown',()=>window.motionBench.startTone(),{once:true});
+if(location.search.includes('plain'))setInterval(()=>fetch('/metrics',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...motionBench.stats(),visibility:document.visibilityState,focused:document.hasFocus(),audio:tone?.state,wallTime:Date.now()})}).catch(()=>{}),1000);
+function draw(now){
+  if(location.search.includes('focus')&&!document.hasFocus()){requestAnimationFrame(draw);return;}
+  frames++;intervals.push(now-last);last=now;const t=(now-start)/1000,dpr=devicePixelRatio,w=innerWidth,h=innerHeight;
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#101a2a';ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#eff6ff';ctx.font='bold 23px sans-serif';ctx.fillText('FreeCamRecord · 網頁流暢度測試',24,34);
+  ctx.font='16px monospace';ctx.fillStyle='#a9bdd5';ctx.fillText(`時間 ${t.toFixed(3)} s   影格 ${frames}   來源 ${(frames/t).toFixed(1)} FPS`,24,58);
+  // A visible binary frame ID allows the decoded video to be measured, not merely its FPS metadata.
+  ctx.fillStyle='#ff00ff';ctx.fillRect(16,76,12,32);
+  if(tone&&Math.floor(t)!==beepSecond){beepSecond=Math.floor(t);beeps.push(t);const osc=tone.createOscillator(),gain=tone.createGain();osc.frequency.value=880;gain.gain.value=.025;osc.connect(gain).connect(tone.destination);osc.start();osc.stop(tone.currentTime+.09);}
+  ctx.fillStyle=t%1<.1?'white':'#263a52';ctx.fillRect(w-44,76,24,32);
+  for(let bit=0;bit<24;bit++){ctx.fillStyle=(frames>>bit)&1?'#ffffff':'#000000';ctx.fillRect(36+bit*14,76,14,32);}
+  ctx.fillStyle='#a9bdd5';ctx.font='13px sans-serif';ctx.fillText('上方條碼是每次螢幕更新的影格編號，可檢查重複影格與停頓。',24,136);
+  for(let row=0;row<4;row++){
+    const y=180+row*100,speed=100+row*90,span=Math.max(100,w-130);
+    ctx.fillStyle='#21364e';ctx.fillRect(24,y,w-48,2);
+    ctx.fillStyle=['#5edcf3','#ff657b','#ffd365','#79efb6'][row];
+    ctx.fillRect(24+(t*speed)%span,y-22,64,46);
+    ctx.fillStyle='#c4d6eb';ctx.font='14px monospace';ctx.fillText(`${speed} px/s`,24,y+48);
+  }
+  const cy=Math.max(640,h-90);ctx.save();ctx.beginPath();ctx.rect(24,cy-35,w-48,70);ctx.clip();
+  ctx.fillStyle='#ffffff';ctx.font='bold 29px sans-serif';
+  const text='連續捲動測試  ABCDEFG  0123456789  ●  ';const width=ctx.measureText(text).width;
+  for(let x=-((t*180)%width);x<w;x+=width)ctx.fillText(text,x,cy+10);ctx.restore();
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+</script></html>
