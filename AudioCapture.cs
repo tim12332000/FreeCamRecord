@@ -12,6 +12,11 @@ public sealed class AudioCapture : IDisposable
     private readonly bool microphone;
     private readonly List<CaptureTrack> tracks = new();
     private bool started;
+    private long timelineOriginFrame;
+    private long legacyReadFrame;
+    private long completedTimestampFallbackPackets;
+    public long TimestampFallbackPackets => Interlocked.Read(ref completedTimestampFallbackPackets) + tracks.Sum(track => track.TimestampFallbackPackets);
+    public string? TimingWarning => TimestampFallbackPackets == 0 ? null : UiText.T("音訊裝置回報無效時間戳記，部分音訊時間採用連續封包／到達時間近似。", "The audio device reported invalid timestamps. Some audio timing is approximated using consecutive packets or arrival times.");
     public string? Error
     {
         get
@@ -30,9 +35,11 @@ public sealed class AudioCapture : IDisposable
 
     public void Start()
     {
-        if (started) throw new InvalidOperationException("音訊已開始錄製。");
+        if (started) throw new InvalidOperationException(UiText.T("音訊已開始錄製。", "Audio recording has already started."));
         try
         {
+            Interlocked.Exchange(ref completedTimestampFallbackPackets, 0);
+            SetTimelineOrigin(RecordingTimeline.QpcNow());
             if (systemAudio) tracks.Add(new CaptureTrack(true));
             if (microphone) tracks.Add(new CaptureTrack(false));
             foreach (var track in tracks) track.Start();
@@ -47,12 +54,29 @@ public sealed class AudioCapture : IDisposable
 
     public byte[] ReadFrames(int sampleFrames)
     {
+        long firstFrame = Interlocked.Read(ref legacyReadFrame);
+        byte[] result = ReadFramesAt(firstFrame, sampleFrames);
+        Interlocked.Add(ref legacyReadFrame, sampleFrames);
+        return result;
+    }
+
+    public void SetTimelineOrigin(long qpcTicks100ns)
+    {
+        Interlocked.Exchange(ref timelineOriginFrame, TimestampedAudioBuffer.Qpc100nsToFrame(qpcTicks100ns));
+        Interlocked.Exchange(ref legacyReadFrame, 0);
+    }
+
+    public byte[] ReadFramesAt(long firstFrame, int sampleFrames)
+    {
+        if (firstFrame < 0) throw new ArgumentOutOfRangeException(nameof(firstFrame));
         if (sampleFrames < 0 || sampleFrames > 48000 * 10)
             throw new ArgumentOutOfRangeException(nameof(sampleFrames));
+        long absoluteFrame = checked(Interlocked.Read(ref timelineOriginFrame) + firstFrame);
+        _ = checked(absoluteFrame + sampleFrames);
         var output = new byte[checked(sampleFrames * 4)];
         if (tracks.Count == 0) return output;
         var mixed = new float[sampleFrames * 2];
-        foreach (var track in tracks) track.AddSamples(mixed);
+        foreach (var track in tracks) track.AddSamples(absoluteFrame, mixed);
         for (int i = 0; i < mixed.Length; i++)
         {
             float value = Math.Clamp(mixed[i], -1f, 1f);
@@ -66,6 +90,7 @@ public sealed class AudioCapture : IDisposable
     public void Stop()
     {
         foreach (var track in tracks) track.Dispose();
+        Interlocked.Add(ref completedTimestampFallbackPackets, tracks.Sum(track => track.TimestampFallbackPackets));
         tracks.Clear();
         started = false;
     }
@@ -75,54 +100,33 @@ public sealed class AudioCapture : IDisposable
     private sealed class CaptureTrack : IDisposable
     {
         private readonly bool loopback;
-        // Bound memory to two seconds per source. Drop the oldest samples if capture outruns the writer.
-        private readonly float[] ring = new float[48000 * 2 * 2];
-        private readonly object gate = new();
+        private readonly TimestampedAudioBuffer buffer = new();
+        private readonly TimestampedAudioResampler resampler;
         private readonly ManualResetEventSlim ready = new(false);
         private Thread? thread;
         private volatile bool stop;
         private Exception? startupError;
         private volatile string? error;
-        private int head, count;
         public string? Error => error;
+        public long TimestampFallbackPackets => resampler.TimestampFallbackPackets;
 
-        public CaptureTrack(bool loopback) => this.loopback = loopback;
+        public CaptureTrack(bool loopback)
+        {
+            this.loopback = loopback;
+            resampler = new TimestampedAudioResampler(buffer);
+        }
 
         public void Start()
         {
             thread = new Thread(Run) { IsBackground = true, Name = loopback ? "System audio" : "Microphone" };
             thread.Start();
             if (!ready.Wait(TimeSpan.FromSeconds(8)))
-                throw new InvalidOperationException("音訊裝置啟動逾時。");
+                throw new InvalidOperationException(UiText.T("音訊裝置啟動逾時。", "The audio device took too long to start."));
             if (startupError != null)
-                throw new InvalidOperationException((loopback ? "無法錄製系統音效：" : "無法使用麥克風：") + startupError.Message, startupError);
+                throw new InvalidOperationException((loopback ? UiText.T("無法錄製系統音效：", "Unable to record system audio: ") : UiText.T("無法使用麥克風：", "Unable to use the microphone: ")) + startupError.Message, startupError);
         }
 
-        public void AddSamples(float[] destination)
-        {
-            lock (gate)
-            {
-                int available = Math.Min(destination.Length, count);
-                for (int i = 0; i < available; i++)
-                {
-                    destination[i] += ring[head];
-                    head = (head + 1) % ring.Length;
-                }
-                count -= available;
-            }
-        }
-
-        private void Push(float left, float right)
-        {
-            if (count + 2 > ring.Length)
-            {
-                head = (head + 2) % ring.Length;
-                count -= 2;
-            }
-            ring[(head + count) % ring.Length] = left;
-            ring[(head + count + 1) % ring.Length] = right;
-            count += 2;
-        }
+        public void AddSamples(long firstFrame, float[] destination) => buffer.AddAt(firstFrame, destination);
 
         private void Run()
         {
@@ -151,16 +155,16 @@ public sealed class AudioCapture : IDisposable
                 if (tag == 0xfffe)
                 {
                     if ((ushort)Marshal.ReadInt16(format, 16) < 22)
-                        throw new InvalidOperationException("音訊延伸格式不完整。");
+                        throw new InvalidOperationException(UiText.T("音訊延伸格式不完整。", "The extended audio format is incomplete."));
                     Guid subFormat = Marshal.PtrToStructure<Guid>(IntPtr.Add(format, 24));
                     if (subFormat == new Guid("00000003-0000-0010-8000-00AA00389B71")) tag = 3;
                     else if (subFormat == new Guid("00000001-0000-0010-8000-00AA00389B71")) tag = 1;
-                    else throw new InvalidOperationException("此音訊裝置使用不支援的格式。");
+                    else throw new InvalidOperationException(UiText.T("此音訊裝置使用不支援的格式。", "This audio device uses an unsupported format."));
                 }
                 if (channels < 1 || channels > 32 || rate < 8000 || rate > 384000 ||
                     !((tag == 3 && bits == 32) || (tag == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32))) ||
                     block < channels * (bits / 8))
-                    throw new InvalidOperationException("此音訊裝置使用不支援的取樣格式。");
+                    throw new InvalidOperationException(UiText.T("此音訊裝置使用不支援的取樣格式。", "This audio device uses an unsupported sample format."));
                 Check(client.Initialize(0, loopback ? 0x00020000u : 0u, 1_000_000, 0, format, IntPtr.Zero));
                 Guid captureId = typeof(IAudioCaptureClient).GUID;
                 Check(client.GetService(ref captureId, out var captureObject));
@@ -170,17 +174,16 @@ public sealed class AudioCapture : IDisposable
                 announced = true;
                 ready.Set();
                 byte[] packet = Array.Empty<byte>();
-                long inputIndex = 0;
-                double nextOutput = 0, step = rate / 48000.0;
-                float previousLeft = 0, previousRight = 0;
+                float[] decoded = Array.Empty<float>();
                 while (!stop)
                 {
                     Check(capture.GetNextPacketSize(out uint available));
                     while (available > 0 && !stop)
                     {
-                        Check(capture.GetBuffer(out IntPtr data, out uint frames, out uint flags, out _, out _));
+                        Check(capture.GetBuffer(out IntPtr data, out uint frames, out uint flags, out _, out ulong qpcPosition));
                         try
                         {
+                            long arrival = RecordingTimeline.QpcNow();
                             int bytes = checked((int)frames * block);
                             bool silent = (flags & 2) != 0;
                             if (!silent)
@@ -188,45 +191,39 @@ public sealed class AudioCapture : IDisposable
                                 if (packet.Length < bytes) packet = new byte[bytes];
                                 Marshal.Copy(data, packet, 0, bytes);
                             }
-                            lock (gate)
+                            int sampleCount = checked((int)frames * 2);
+                            if (decoded.Length < sampleCount) decoded = new float[sampleCount];
+                            for (int frame = 0; frame < frames; frame++)
                             {
-                                for (int frame = 0; frame < frames; frame++, inputIndex++)
+                                float left = 0, right = 0;
+                                if (!silent)
                                 {
-                                    float left = 0, right = 0;
-                                    if (!silent)
+                                    int offset = frame * block;
+                                    int stride = bits / 8;
+                                    left = Sample(packet, offset, tag, bits);
+                                    right = channels == 1 ? left : Sample(packet, offset + stride, tag, bits);
+                                    // Standard Windows multichannel order: L, R, C, LFE, back/side pairs.
+                                    if (channels > 2)
                                     {
-                                        int offset = frame * block;
-                                        int stride = bits / 8;
-                                        left = Sample(packet, offset, tag, bits);
-                                        right = channels == 1 ? left : Sample(packet, offset + stride, tag, bits);
-                                        // Standard Windows multichannel order: L, R, C, LFE, back/side pairs.
-                                        if (channels > 2)
+                                        float center = Sample(packet, offset + 2 * stride, tag, bits) * 0.7071f;
+                                        left += center; right += center;
+                                        if (channels > 3)
                                         {
-                                            float center = Sample(packet, offset + 2 * stride, tag, bits) * 0.7071f;
-                                            left += center; right += center;
-                                            if (channels > 3)
-                                            {
-                                                float bass = Sample(packet, offset + 3 * stride, tag, bits) * 0.25f;
-                                                left += bass; right += bass;
-                                            }
-                                            for (int channel = 4; channel < channels; channel++)
-                                            {
-                                                float surround = Sample(packet, offset + channel * stride, tag, bits) * 0.5f;
-                                                if ((channel & 1) == 0) left += surround; else right += surround;
-                                            }
+                                            float bass = Sample(packet, offset + 3 * stride, tag, bits) * 0.25f;
+                                            left += bass; right += bass;
+                                        }
+                                        for (int channel = 4; channel < channels; channel++)
+                                        {
+                                            float surround = Sample(packet, offset + channel * stride, tag, bits) * 0.5f;
+                                            if ((channel & 1) == 0) left += surround; else right += surround;
                                         }
                                     }
-                                    if (inputIndex == 0) { previousLeft = left; previousRight = right; }
-                                    while (nextOutput <= inputIndex)
-                                    {
-                                        float fraction = inputIndex == 0 ? 1f : (float)(nextOutput - (inputIndex - 1));
-                                        Push(previousLeft + (left - previousLeft) * fraction,
-                                             previousRight + (right - previousRight) * fraction);
-                                        nextOutput += step;
-                                    }
-                                    previousLeft = left; previousRight = right;
                                 }
+                                decoded[frame * 2] = left;
+                                decoded[frame * 2 + 1] = right;
                             }
+                            resampler.ProcessPacket(decoded.AsSpan(0, sampleCount), rate,
+                                qpcPosition <= long.MaxValue ? (long)qpcPosition : 0, flags, arrival);
                         }
                         finally { Check(capture.ReleaseBuffer(frames)); }
                         Check(capture.GetNextPacketSize(out available));
@@ -236,7 +233,7 @@ public sealed class AudioCapture : IDisposable
             }
             catch (Exception ex)
             {
-                error = (loopback ? "系統音效錄製中斷：" : "麥克風錄製中斷：") + ex.Message;
+                error = (loopback ? UiText.T("系統音效錄製中斷：", "System audio recording interrupted: ") : UiText.T("麥克風錄製中斷：", "Microphone recording interrupted: ")) + ex.Message;
                 if (!announced) startupError = ex;
             }
             finally

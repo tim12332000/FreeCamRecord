@@ -32,28 +32,28 @@ internal sealed class DxgiDesktopCapture : IDisposable
         try
         {
             Guid factoryId = new("770aae78-f26f-4dba-a829-253c83d1b387");
-            Check(CreateDXGIFactory1(ref factoryId, out factory), "建立 DXGI 工廠");
+            Check(CreateDXGIFactory1(ref factoryId, out factory), UiText.T("建立 DXGI 工廠", "Create DXGI factory"));
             bool matched = false;
             for (uint adapterIndex = 0; !matched; adapterIndex++)
             {
                 int hr = Method<Enumerate>(factory, 12)(factory, adapterIndex, out adapter);
                 if (hr == NotFound) break;
-                Check(hr, "列舉顯示卡");
+                Check(hr, UiText.T("列舉顯示卡", "Enumerate graphics adapters"));
                 for (uint outputIndex = 0; !matched; outputIndex++)
                 {
                     hr = Method<Enumerate>(adapter, 7)(adapter, outputIndex, out output);
                     if (hr == NotFound) break;
-                    Check(hr, "列舉螢幕");
-                    Check(Method<GetOutputDescription>(output, 7)(output, out var description), "讀取螢幕範圍");
+                    Check(hr, UiText.T("列舉螢幕", "Enumerate displays"));
+                    Check(Method<GetOutputDescription>(output, 7)(output, out var description), UiText.T("讀取螢幕範圍", "Read display bounds"));
                     var bounds = Rectangle.FromLTRB(description.Left, description.Top, description.Right, description.Bottom);
                     if (description.Attached != 0 && bounds.Contains(area))
                     {
-                        if (description.Rotation > 1) throw new NotSupportedException("DXGI 錄影暫不支援旋轉螢幕，請使用一般桌面擷取。");
+                        if (description.Rotation > 1) throw new NotSupportedException(UiText.T("DXGI 錄影暫不支援旋轉螢幕，請使用一般桌面擷取。", "DXGI recording does not support rotated displays. Use standard desktop capture."));
                         // Device must belong to the adapter that owns the selected output.
-                        Check(D3D11CreateDevice(adapter, 0, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out device, out _, out context), "建立錄影 GPU 裝置");
+                        Check(D3D11CreateDevice(adapter, 0, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out device, out _, out context), UiText.T("建立錄影 GPU 裝置", "Create recording GPU device"));
                         Guid outputId = new("00cddea8-939b-4b83-a340-a685226666cc");
-                        Check(Method<QueryInterface>(output, 0)(output, ref outputId, out output1), "取得桌面複製介面");
-                        Check(Method<DuplicateOutput>(output1, 22)(output1, device, out duplication), "啟動 GPU 桌面擷取");
+                        Check(Method<QueryInterface>(output, 0)(output, ref outputId, out output1), UiText.T("取得桌面複製介面", "Get desktop duplication interface"));
+                        Check(Method<DuplicateOutput>(output1, 22)(output1, device, out duplication), UiText.T("啟動 GPU 桌面擷取", "Start GPU desktop capture"));
                         sourceBox = new Box
                         {
                             Left = (uint)(area.Left - bounds.Left), Top = (uint)(area.Top - bounds.Top),
@@ -65,20 +65,20 @@ internal sealed class DxgiDesktopCapture : IDisposable
                 }
                 Release(ref adapter);
             }
-            if (!matched) throw new NotSupportedException("DXGI 錄影範圍必須位於同一個螢幕內，請使用一般桌面擷取。");
+            if (!matched) throw new NotSupportedException(UiText.T("DXGI 錄影範圍必須位於同一個螢幕內，請使用一般桌面擷取。", "The DXGI recording area must fit within one display. Use standard desktop capture."));
             var texture = new TextureDescription
             {
                 Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1,
                 Format = 87, SampleCount = 1, Usage = 3, CpuAccess = 0x20000
             };
-            Check(Method<CreateTexture>(device, 5)(device, ref texture, IntPtr.Zero, out staging), "建立 GPU 讀取緩衝區");
+            Check(Method<CreateTexture>(device, 5)(device, ref texture, IntPtr.Zero, out staging), UiText.T("建立 GPU 讀取緩衝區", "Create GPU readback buffer"));
             memoryDc = CreateCompatibleDC(IntPtr.Zero);
-            if (memoryDc == IntPtr.Zero) FailGdi("建立游標繪圖裝置");
+            if (memoryDc == IntPtr.Zero) FailGdi(UiText.T("建立游標繪圖裝置", "Create cursor drawing device"));
             var imageInfo = new BitmapInfo { Size = 40, Width = width, Height = -height, Planes = 1, Bits = 32 };
             dib = CreateDIBSection(memoryDc, ref imageInfo, 0, out pixels, IntPtr.Zero, 0);
-            if (dib == IntPtr.Zero || pixels == IntPtr.Zero) FailGdi("建立 GPU 錄影像素緩衝區");
+            if (dib == IntPtr.Zero || pixels == IntPtr.Zero) FailGdi(UiText.T("建立 GPU 錄影像素緩衝區", "Create GPU recording pixel buffer"));
             previous = SelectObject(memoryDc, dib);
-            if (previous == IntPtr.Zero || previous == new IntPtr(-1)) FailGdi("選取 GPU 錄影像素緩衝區");
+            if (previous == IntPtr.Zero || previous == new IntPtr(-1)) FailGdi(UiText.T("選取 GPU 錄影像素緩衝區", "Select GPU recording pixel buffer"));
             bitmap = new Bitmap(width, height, stride, PixelFormat.Format32bppRgb, pixels);
         }
         catch { Dispose(); throw; }
@@ -89,16 +89,16 @@ internal sealed class DxgiDesktopCapture : IDisposable
     internal void OverlayCursor(Rectangle area)
     {
         if (disposed) throw new ObjectDisposedException(nameof(DxgiDesktopCapture));
-        if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException("GPU 擷取必須在原本的錄影執行緒操作。");
+        if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException(UiText.T("GPU 擷取必須在原本的錄影執行緒操作。", "GPU capture must run on the original recording thread."));
         if (!NeedsCursorOverlay) return;
         Native.DrawCursor(memoryDc, area);
-        if (!GdiFlush()) FailGdi("同步錄影游標");
+        if (!GdiFlush()) FailGdi(UiText.T("同步錄影游標", "Synchronize recording cursor"));
     }
 
     internal Bitmap? Capture(int timeoutMilliseconds)
     {
         if (disposed) throw new ObjectDisposedException(nameof(DxgiDesktopCapture));
-        if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException("GPU 擷取必須在原本的錄影執行緒操作。");
+        if (ownerThread != Environment.CurrentManagedThreadId) throw new InvalidOperationException(UiText.T("GPU 擷取必須在原本的錄影執行緒操作。", "GPU capture must run on the original recording thread."));
         if (timeoutMilliseconds < 0 || timeoutMilliseconds > 1000) throw new ArgumentOutOfRangeException(nameof(timeoutMilliseconds));
         IntPtr resource = IntPtr.Zero, texture = IntPtr.Zero;
         bool acquired = false, mapped = false;
@@ -106,8 +106,8 @@ internal sealed class DxgiDesktopCapture : IDisposable
         {
             int hr = Method<AcquireFrame>(duplication, 8)(duplication, (uint)timeoutMilliseconds, out var info, out resource);
             if (hr == WaitTimeout) return null;
-            if (hr == AccessLost) throw new InvalidOperationException("GPU 桌面擷取已失效（螢幕或顯示模式已改變）。");
-            Check(hr, "取得 GPU 桌面影格");
+            if (hr == AccessLost) throw new InvalidOperationException(UiText.T("GPU 桌面擷取已失效（螢幕或顯示模式已改變）。", "GPU desktop capture was lost (the display or display mode changed)."));
+            Check(hr, UiText.T("取得 GPU 桌面影格", "Acquire GPU desktop frame"));
             acquired = true;
             if (info.LastMouseUpdateTime != 0 || !hasDesktopImage) NeedsCursorOverlay = info.PointerVisible != 0;
             // Mouse-only updates still need a clean copy of the last desktop before drawing
@@ -116,13 +116,13 @@ internal sealed class DxgiDesktopCapture : IDisposable
             if (info.LastPresentTime != 0)
             {
                 Guid textureId = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
-                Check(Method<QueryInterface>(resource, 0)(resource, ref textureId, out texture), "取得 GPU 畫面紋理");
+                Check(Method<QueryInterface>(resource, 0)(resource, ref textureId, out texture), UiText.T("取得 GPU 畫面紋理", "Get GPU frame texture"));
                 Method<CopyRegion>(context, 46)(context, staging, 0, 0, 0, 0, texture, 0, ref sourceBox);
             }
-            Check(Method<MapResource>(context, 14)(context, staging, 0, 1, 0, out var mapping), "讀取 GPU 錄影像素");
+            Check(Method<MapResource>(context, 14)(context, staging, 0, 1, 0, out var mapping), UiText.T("讀取 GPU 錄影像素", "Read GPU recording pixels"));
             mapped = true;
-            if (mapping.RowPitch < stride) throw new InvalidOperationException("GPU 錄影像素列長度無效。");
-            Check(MFCopyImage(pixels, stride, mapping.Data, (int)mapping.RowPitch, (uint)stride, (uint)height), "複製 GPU 錄影像素");
+            if (mapping.RowPitch < stride) throw new InvalidOperationException(UiText.T("GPU 錄影像素列長度無效。", "The GPU recording pixel row length is invalid."));
+            Check(MFCopyImage(pixels, stride, mapping.Data, (int)mapping.RowPitch, (uint)stride, (uint)height), UiText.T("複製 GPU 錄影像素", "Copy GPU recording pixels"));
             hasDesktopImage = true;
             LastPresentTime = info.LastPresentTime;
             AccumulatedFrames = info.AccumulatedFrames;
@@ -132,7 +132,7 @@ internal sealed class DxgiDesktopCapture : IDisposable
         {
             if (mapped) Method<UnmapResource>(context, 15)(context, staging, 0);
             Release(ref texture); Release(ref resource);
-            if (acquired) Check(Method<SimpleCall>(duplication, 14)(duplication), "釋放 GPU 桌面影格");
+            if (acquired) Check(Method<SimpleCall>(duplication, 14)(duplication), UiText.T("釋放 GPU 桌面影格", "Release GPU desktop frame"));
         }
     }
 
@@ -153,9 +153,9 @@ internal sealed class DxgiDesktopCapture : IDisposable
     private static void Release(ref IntPtr value) { if (value != IntPtr.Zero) { Marshal.Release(value); value = IntPtr.Zero; } }
     private static void Check(int hr, string operation)
     {
-        if (hr < 0) throw new COMException($"{operation}失敗（0x{hr:X8}）：{Marshal.GetExceptionForHR(hr)?.Message}", hr);
+        if (hr < 0) throw new COMException(UiText.T($"{operation}失敗（0x{hr:X8}）：{Marshal.GetExceptionForHR(hr)?.Message}", $"{operation} failed (0x{hr:X8}): {Marshal.GetExceptionForHR(hr)?.Message}"), hr);
     }
-    private static void FailGdi(string operation) => throw new Win32Exception(Marshal.GetLastWin32Error(), operation + "失敗。");
+    private static void FailGdi(string operation) => throw new Win32Exception(Marshal.GetLastWin32Error(), operation + UiText.T("失敗。", " failed."));
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfo

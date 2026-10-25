@@ -80,7 +80,7 @@ try {
     $frame = New-Object ActualUi+R
     [void][ActualUi]::GetWindowRect($app.MainWindowHandle,[ref]$frame)
     $desiredLeft=$browserRect.Left-4; $desiredTop=$browserRect.Top-36
-    Drag ($frame.Left+175) ($frame.Top+15) ($desiredLeft+175) ($desiredTop+15)
+    Drag ($frame.Left+220) ($frame.Top+15) ($desiredLeft+220) ($desiredTop+15)
     [void][ActualUi]::GetWindowRect($app.MainWindowHandle,[ref]$frame)
     Drag ($frame.Right-2) ($frame.Bottom-2) ($browserRect.Right+2) ($browserRect.Bottom+2)
     [void][ActualUi]::GetWindowRect($app.MainWindowHandle,[ref]$frame)

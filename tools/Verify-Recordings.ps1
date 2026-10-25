@@ -45,7 +45,9 @@ foreach ($line in $lines) {
     $log = Invoke-Decoder @('-hide_banner', '-i', $clip, '-f', 'null', '-')
     if ($log -notmatch 'Video: h264') { throw "Expected H.264: $clip" }
     $rate = [regex]::Match($log, 'Video:[^\r\n]*?([0-9.]+) fps')
-    if (-not $rate.Success -or [Math]::Abs([double]::Parse($rate.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) - $fps) -gt 0.02) { throw "Wrong MP4 frame rate: $clip" }
+    # Clock-aligned skipped slots legitimately reduce average FPS without shortening the timeline.
+    $averageFps = if ($rate.Success) { [double]::Parse($rate.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) } else { 0 }
+    if ($averageFps -le 0 -or $averageFps -gt $fps + 0.02) { throw "Invalid MP4 frame rate for target ${fps}: $clip" }
     if ($log -notmatch ([regex]::Escape("${width}x${height}"))) { throw "Wrong MP4 dimensions: $clip" }
     $preview = $clip + '.decoded.bmp'
     [void](Invoke-Decoder @('-y', '-v', 'error', '-i', $clip, '-frames:v', '1', $preview))

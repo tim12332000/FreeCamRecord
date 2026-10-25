@@ -8,7 +8,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\FreeCamRecord.ico</ApplicationIcon>
     <AssemblyName>FreeCamRecord</AssemblyName>
-    <Version>0.3.1</Version>
+    <Version>0.5.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\FreeCamRecord.ico" />

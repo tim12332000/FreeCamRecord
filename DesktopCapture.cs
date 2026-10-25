@@ -22,18 +22,18 @@ internal sealed class DesktopCapture : IDisposable
         try
         {
             desktopDc = GetDC(IntPtr.Zero);
-            if (desktopDc == IntPtr.Zero) Fail("取得桌面繪圖裝置");
+            if (desktopDc == IntPtr.Zero) Fail(UiText.T("取得桌面繪圖裝置", "Get desktop drawing device"));
             memoryDc = CreateCompatibleDC(desktopDc);
-            if (memoryDc == IntPtr.Zero) Fail("建立錄影繪圖裝置");
+            if (memoryDc == IntPtr.Zero) Fail(UiText.T("建立錄影繪圖裝置", "Create recording drawing device"));
             var info = new BitmapInfo
             {
                 Size = 40, Width = area.Width, Height = -area.Height,
                 Planes = 1, Bits = 32
             };
             dib = CreateDIBSection(desktopDc, ref info, 0, out var pixels, IntPtr.Zero, 0);
-            if (dib == IntPtr.Zero || pixels == IntPtr.Zero) Fail("建立錄影像素緩衝區");
+            if (dib == IntPtr.Zero || pixels == IntPtr.Zero) Fail(UiText.T("建立錄影像素緩衝區", "Create recording pixel buffer"));
             previous = SelectObject(memoryDc, dib);
-            if (previous == IntPtr.Zero || previous == new IntPtr(-1)) Fail("選取錄影像素緩衝區");
+            if (previous == IntPtr.Zero || previous == new IntPtr(-1)) Fail(UiText.T("選取錄影像素緩衝區", "Select recording pixel buffer"));
             // GDI screen copies do not define the alpha byte. RGB explicitly treats it as opaque.
             image = new Bitmap(area.Width, area.Height, stride, PixelFormat.Format32bppRgb, pixels);
         }
@@ -44,10 +44,10 @@ internal sealed class DesktopCapture : IDisposable
     {
         if (disposed) throw new ObjectDisposedException(nameof(DesktopCapture));
         if (!BitBlt(memoryDc, 0, 0, area.Width, area.Height, desktopDc, area.X, area.Y, 0x00CC0020))
-            Fail("擷取桌面畫面");
+            Fail(UiText.T("擷取桌面畫面", "Capture desktop frame"));
         Native.DrawCursor(memoryDc, area);
         // Complete this thread's batched GDI writes before the encoder reads the shared pixels.
-        if (!GdiFlush()) Fail("同步錄影像素緩衝區");
+        if (!GdiFlush()) Fail(UiText.T("同步錄影像素緩衝區", "Synchronize recording pixel buffer"));
         return image!;
     }
 
@@ -64,7 +64,7 @@ internal sealed class DesktopCapture : IDisposable
         desktopDc = memoryDc = dib = previous = IntPtr.Zero;
     }
 
-    private static void Fail(string operation) => throw new Win32Exception(Marshal.GetLastWin32Error(), operation + "失敗。");
+    private static void Fail(string operation) => throw new Win32Exception(Marshal.GetLastWin32Error(), operation + UiText.T("失敗。", " failed."));
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfo

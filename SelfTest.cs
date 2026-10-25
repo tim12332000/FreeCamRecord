@@ -85,7 +85,7 @@ internal static class SelfTest
         await CaptureScreenshot(frame.Bounds, "initial.png", frame);
         GetWindowRect(frame.Handle, out var native); results.Add($"NATIVE BOUNDS: {native}");
         var old = frame.Bounds;
-        await Drag(new Point(frame.Left + 175, frame.Top + 15), new Point(frame.Left + 215, frame.Top + 45));
+        await Drag(new Point(frame.Left + 220, frame.Top + 15), new Point(frame.Left + 260, frame.Top + 45));
         results.Add($"DRAG: before={old}; after={frame.Bounds}; DPI={frame.DeviceDpi}");
         Require(frame.Left == old.Left + 40 && frame.Top == old.Top + 30, "drag toolbar moves capture frame");
         old = frame.Bounds;
@@ -150,7 +150,7 @@ internal static class SelfTest
         await CaptureScreenshot(frame.Bounds, "recording.png", frame);
         await Task.Delay(1800);
         old = frame.Bounds;
-        await Drag(new Point(frame.Left + 175, frame.Top + 15), new Point(frame.Left + 195, frame.Top + 25));
+        await Drag(new Point(frame.Left + 220, frame.Top + 15), new Point(frame.Left + 240, frame.Top + 25));
         Require(frame.Bounds == old, "capture frame cannot move during recording");
         record.PerformClick();
         await WaitUntil(() => record.Text.Contains("錄影") && record.Enabled, "stop and save");
@@ -297,7 +297,7 @@ internal static class SelfTest
         Require(FourCC() == "RIFF", "AVI has RIFF header");
         Require(reader.ReadUInt32() + 8 == reader.BaseStream.Length, "AVI RIFF size is finalized");
         Require(FourCC() == "AVI ", "AVI type header");
-        int frames = 0, audioBytes = 0, nonzero = 0, indexEntries = 0;
+        int frames = 0, audioBytes = 0, nonzero = 0, indexEntries = 0, chunks = 0;
         var imageHashes = new HashSet<string>();
         while (reader.BaseStream.Position < reader.BaseStream.Length)
         {
@@ -309,11 +309,12 @@ internal static class SelfTest
                 {
                     while (reader.BaseStream.Position < end)
                     {
-                        string chunk = FourCC(); int count = reader.ReadInt32(); byte[] data = reader.ReadBytes(count);
+                        string chunk = FourCC(); int count = reader.ReadInt32(); byte[] data = reader.ReadBytes(count); chunks++;
                         if ((count & 1) != 0) reader.ReadByte();
                         if (chunk == "00dc")
                         {
                             frames++;
+                            if (data.Length == 0) continue; // AVI timed null frame holds the preceding picture.
                             imageHashes.Add(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data)));
                             if (frames == 1)
                             {
@@ -336,8 +337,8 @@ internal static class SelfTest
         }
         Require(frames >= 15, "recorded at least one second of video");
         Require(imageHashes.Count > 1, "video contains changing screen content");
-        Require(indexEntries == frames * (expectAudio ? 2 : 1), "AVI index covers video and audio chunks");
-        Require(expectAudio ? audioBytes == (long)frames * 48000 / fps * 4 && nonzero > 1000 : audioBytes == 0, "audio stream matches selected settings and video duration");
+        Require(indexEntries == chunks, "AVI index covers video and independent audio chunks");
+        Require(expectAudio ? Math.Abs(audioBytes / 192000.0 - (double)frames / fps) <= 1.0 / fps + .02 && nonzero > 1000 : audioBytes == 0, "audio stream matches selected settings and physical duration");
         results.Add($"FILE: {path}; frames={frames}; audioBytes={audioBytes}; nonzeroAudio={nonzero}");
     }
 

@@ -62,10 +62,22 @@ internal sealed class AviWriter : IDisposable
         FourCC(id); writer.Write(data.Length); writer.Write(data);
         if ((data.Length & 1) != 0) writer.Write((byte)0);
     }
-    internal void WriteFrame(byte[] jpeg, byte[]? pcm)
+    internal void WriteVideo(byte[] jpeg, long slot)
     {
+        if (slot < frames) throw new ArgumentOutOfRangeException(nameof(slot));
+        // Standard AVI null frames preserve elapsed fixed-rate slots without re-encoding.
+        while (frames < slot) { Chunk("00dc", Array.Empty<byte>()); frames++; }
         Chunk("00dc", jpeg); frames++;
-        if (audio && pcm != null) { Chunk("01wb", pcm); samples += (uint)(pcm.Length / 4); }
+    }
+    internal void ExtendVideoTo(long slots)
+    {
+        while (frames < slots) { Chunk("00dc", Array.Empty<byte>()); frames++; }
+    }
+    internal void WriteAudio(byte[] pcm)
+    {
+        if (!audio || pcm.Length % 4 != 0) throw new ArgumentException(UiText.T("AVI 音訊資料無效。", "The AVI audio data is invalid."), nameof(pcm));
+        if (pcm.Length == 0) return;
+        Chunk("01wb", pcm); samples += (uint)(pcm.Length / 4);
     }
     public void Dispose()
     {
@@ -77,7 +89,7 @@ internal sealed class AviWriter : IDisposable
             FourCC("idx1"); writer.Write(checked(index.Count * 16));
             foreach (var entry in index)
             {
-                FourCC(entry.Id); writer.Write(0x10); writer.Write(entry.Offset); writer.Write(entry.Size);
+                FourCC(entry.Id); writer.Write(entry.Size == 0 ? 0 : 0x10); writer.Write(entry.Offset); writer.Write(entry.Size);
             }
             Patch(mainFrames, frames); Patch(videoFrames, frames);
             if (audio) Patch(audioFrames, samples);
