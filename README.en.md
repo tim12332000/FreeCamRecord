@@ -12,6 +12,7 @@ Download the Windows x64 ZIP from [GitHub Releases](https://github.com/tim123320
 - Use **Select recording area** (the frame icon, also available in the menu). Hover to see rectangular candidates based on visible pixel boundaries. Click to pin a candidate, use the wheel to switch candidates, and confirm the region. You can also drag a rectangle and adjust its edges. Esc cancels and keeps the original region.
 - The frame is transparent and lets you operate the application underneath. There is no video preview.
 - Click **REC**, then **Stop** to save automatically. The default destination is `Videos\FreeCamRecord` in your user profile. Click **Saved** or use the menu to open the folder.
+- Click **Take photo** (the camera icon) to save the selected area as a PNG in the same output folder. Photos can also be taken while recording.
 - The menu controls format, target frame rate, save location, system audio, and microphone. Defaults are MP4, Auto FPS, system audio on, and microphone off.
 - In v0.5.0, choose **Language / 語言 → English / 繁體中文**. The choice is saved for future launches; Traditional Chinese remains the default. Buttons, tooltips, selection controls, errors, and Help follow the selected language.
 - **Help / About** shows the running version and usage instructions. It is disabled during recording to preserve the source application's focus. Windows-provided dialogs and native error details may follow the Windows display language.

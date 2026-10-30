@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Imaging;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -36,7 +37,7 @@ internal sealed class Preferences
 internal sealed class CaptureFrame : Form
 {
     internal const int Edge = 4, Toolbar = 36;
-    private readonly Button menuButton = MakeButton(""), selectButton = MakeButton(""), sizeButton = MakeButton(""), recordButton = MakeButton(""), closeButton = MakeButton("");
+    private readonly Button menuButton = MakeButton(""), selectButton = MakeButton(""), sizeButton = MakeButton(""), photoButton = MakeButton(""), recordButton = MakeButton(""), closeButton = MakeButton("");
     private readonly Dictionary<(ArtIcon Icon, bool Accent), Bitmap> artwork = new();
     private readonly Icon appIcon;
     private readonly ContextMenuStrip menu = new();
@@ -46,6 +47,7 @@ internal sealed class CaptureFrame : Form
     private ScreenRecorder? session;
     private bool busy, closeRequested;
     private DateTime savedUntil;
+    private DateTime photoSavedUntil;
     private string? lastSaved;
     private int dragEdges;
     private Point dragOrigin;
@@ -76,11 +78,13 @@ internal sealed class CaptureFrame : Form
         Font = new Font("Microsoft JhengHei UI", 9);
         DoubleBuffered = true;
         Bounds = new Rectangle(100, 100, 477 + Edge * 2, 430 + Toolbar + Edge);
-        Controls.AddRange(new Control[] { menuButton, selectButton, sizeButton, recordButton, closeButton });
+        Controls.AddRange(new Control[] { menuButton, selectButton, sizeButton, photoButton, recordButton, closeButton });
         FrameTheme.ApplyButton(recordButton, primary: true);
         menuButton.Image = Artwork(ArtIcon.Menu);
         selectButton.Image = Artwork(ArtIcon.Size);
         closeButton.Image = Artwork(ArtIcon.Close);
+        photoButton.Image = Artwork(ArtIcon.Camera);
+        photoButton.ImageAlign = ContentAlignment.MiddleCenter;
         menuButton.ImageAlign = selectButton.ImageAlign = closeButton.ImageAlign = ContentAlignment.MiddleCenter;
         recordButton.Image = Artwork(ArtIcon.Record);
         recordButton.ImageAlign = ContentAlignment.MiddleCenter;
@@ -91,6 +95,7 @@ internal sealed class CaptureFrame : Form
         menuButton.Click += (_, _) => ShowMenu();
         selectButton.Click += async (_, _) => await SelectRegion();
         sizeButton.Click += (_, _) => EditSize();
+        photoButton.Click += (_, _) => TakePhoto();
         recordButton.Click += async (_, _) => await ToggleRecording();
         closeButton.Click += (_, _) => Close();
         timer.Tick += (_, _) => UpdateStatus();
@@ -134,12 +139,14 @@ internal sealed class CaptureFrame : Form
         menuButton.AccessibleName = UiText.T("設定選單", "Settings menu");
         selectButton.AccessibleName = UiText.T("選取錄製區域", "Select recording area");
         sizeButton.AccessibleName = UiText.T("錄影範圍尺寸", "Recording dimensions");
+        photoButton.AccessibleName = UiText.T("拍照", "Take photo");
         recordButton.AccessibleName = session == null ? UiText.T("開始錄影", "Start recording") : UiText.T("停止錄影", "Stop recording");
         closeButton.AccessibleName = UiText.T("關閉", "Close");
         recordButton.Text = session == null ? UiText.T("錄影", "REC") : UiText.T("停止", "Stop");
         tips.SetToolTip(menuButton, UiText.T("聲音、儲存位置、開啟資料夾", "Audio, output folder, language and help"));
         tips.SetToolTip(selectButton, UiText.T("滑鼠指向預選區域；也可直接拖曳框選", "Hover to preview an area, or drag to select"));
         tips.SetToolTip(sizeButton, UiText.T("點擊輸入尺寸；拖曳邊角調整範圍", "Click to enter dimensions; drag edges to resize"));
+        tips.SetToolTip(photoButton, UiText.T("拍照：將目前框選範圍儲存為 PNG（錄影中也可使用）", "Take photo: save the selected area as PNG (also available while recording)"));
         tips.SetToolTip(closeButton, UiText.T("關閉；錄影中會先停止並儲存", "Close; an active recording will be stopped and saved first"));
         UpdateStatus();
     }
@@ -167,10 +174,12 @@ internal sealed class CaptureFrame : Form
         var previous = Region;
         Region = shape;
         previous?.Dispose();
-        selectButton.Visible = Width >= 360;
+        bool showSelector = Width >= 360;
+        selectButton.Visible = showSelector;
         menuButton.SetBounds(3, barOffset + 2, 32, Toolbar - 4);
         selectButton.SetBounds(38, barOffset + 2, 32, Toolbar - 4);
-        sizeButton.SetBounds(selectButton.Visible ? 76 : 38, barOffset + 2, 118, Toolbar - 4);
+        sizeButton.SetBounds(showSelector ? 76 : 38, barOffset + 2, 118, Toolbar - 4);
+        photoButton.SetBounds(Width - 163, barOffset + 2, 32, Toolbar - 4);
         recordButton.SetBounds(Width - 127, barOffset + 3, 87, Toolbar - 6);
         closeButton.SetBounds(Width - 36, barOffset + 2, 32, Toolbar - 4);
         savedUntil = DateTime.MinValue;
@@ -252,6 +261,8 @@ internal sealed class CaptureFrame : Form
 
     private void UpdateStatus()
     {
+        photoButton.Enabled = !busy && !selecting;
+        photoButton.Image = Artwork(DateTime.Now < photoSavedUntil ? ArtIcon.Check : ArtIcon.Camera);
         if (busy) return;
         bool saved = DateTime.Now < savedUntil;
         sizeButton.Text = session != null ? $"{session.Elapsed:hh\\:mm\\:ss}" :
@@ -304,7 +315,7 @@ internal sealed class CaptureFrame : Form
         directory.Enabled = session == null && !busy;
         directory.Click += (_, _) =>
         {
-            using var dialog = new FolderBrowserDialog { SelectedPath = settings.Directory, Description = UiText.T("選擇錄影儲存資料夾", "Choose the recording output folder"), UseDescriptionForTitle = true };
+            using var dialog = new FolderBrowserDialog { SelectedPath = settings.Directory, Description = UiText.T("選擇錄影與照片儲存資料夾", "Choose the recording and photo output folder"), UseDescriptionForTitle = true };
             if (dialog.ShowDialog(this) == DialogResult.OK) { settings.Directory = dialog.SelectedPath; SaveSettings(); }
         };
         var open = menu.Items.Add(UiText.T("開啟儲存資料夾", "Open output folder"));
@@ -369,6 +380,40 @@ internal sealed class CaptureFrame : Form
         Size = new Size((int)width.Value + Edge * 2, (int)height.Value + CaptureVerticalMargin);
         Left = Math.Clamp(Left, desktop.Left, Math.Max(desktop.Left, desktop.Right - Width));
         Top = Math.Clamp(Top, desktop.Top, Math.Max(desktop.Top, desktop.Bottom - Height));
+    }
+
+    private void TakePhoto()
+    {
+        if (busy || selecting) return;
+        var area = CaptureArea;
+        if (!SystemInformation.VirtualScreen.Contains(area))
+        {
+            MessageBox.Show(this, UiText.T("拍照範圍超出桌面，請移回螢幕內再拍照。", "The photo area extends beyond the desktop. Move it onto the display before taking a photo."), UiText.T("請調整範圍", "Adjust capture area"));
+            return;
+        }
+        try
+        {
+            tips.Hide(this);
+            Directory.CreateDirectory(settings.Directory);
+            using var capture = new DesktopCapture(area);
+            var image = capture.Capture();
+            string path = Path.Combine(settings.Directory, $"Photo-{DateTime.Now:yyyyMMdd-HHmmss-fffffff}.png");
+            using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+            {
+                try { image.Save(file, ImageFormat.Png); }
+                catch { file.Dispose(); File.Delete(path); throw; }
+            }
+            lastSaved = path;
+            savedUntil = DateTime.Now.AddSeconds(8);
+            photoSavedUntil = DateTime.Now.AddSeconds(2);
+            tips.SetToolTip(photoButton, UiText.T($"照片已儲存：{path}", $"Photo saved: {path}"));
+            tips.SetToolTip(sizeButton, UiText.T($"已儲存：{path}\n點擊開啟資料夾", $"Saved: {path}\nClick to open the folder"));
+            UpdateStatus();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, UiText.T($"無法儲存照片：{ex.Message}", $"Cannot save photo: {ex.Message}"), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private async Task ToggleRecording()

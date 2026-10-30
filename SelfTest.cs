@@ -130,6 +130,8 @@ internal static class SelfTest
         using var pattern = new TestPattern { Bounds = area, TopMost = true };
         pattern.Show(); frame.BringToFront();
         await Task.Delay(300);
+        CheckPhoto(frame, area.Size);
+        CheckPhoto(frame, area.Size);
         Require(new Preferences().Format == "mp4" && new Preferences().Fps == 0, "default format is MP4 with automatic monitor FPS");
         Require(frame.Icon != null, "window has the original application icon");
         using (var executableIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!))
@@ -147,6 +149,8 @@ internal static class SelfTest
         var record = frame.Controls.OfType<Button>().Single(b => b.AccessibleName == "開始錄影");
         record.PerformClick();
         await WaitUntil(() => record.Text.Contains("停止") && record.Enabled, "start recording");
+        CheckPhoto(frame, area.Size);
+        Require(record.Text.Contains("停止") && record.Enabled, "taking a photo preserves active recording");
         await CaptureScreenshot(frame.Bounds, "recording.png", frame);
         await Task.Delay(1800);
         old = frame.Bounds;
@@ -275,6 +279,19 @@ internal static class SelfTest
         Require(aviResult.Error == null, "120 FPS AVI saves successfully");
         InspectAvi(aviResult.Path, area.Size, false, 120);
         Require(Directory.GetFiles(directory, "*.partial").Length == 0, "all MP4 files are finalized without leftover temporary files");
+    }
+
+    private static void CheckPhoto(CaptureFrame frame, Size size)
+    {
+        var before = Directory.GetFiles(directory, "Photo-*.png").ToHashSet();
+        frame.Controls.OfType<Button>().Single(b => b.AccessibleName == "拍照").PerformClick();
+        var added = Directory.GetFiles(directory, "Photo-*.png").Where(path => !before.Contains(path)).ToArray();
+        Require(added.Length == 1, "photo button saves a unique PNG in the configured output folder");
+        using var photo = new Bitmap(added[0]);
+        Require(photo.Size == size, "photo preserves exact selected dimensions including odd widths");
+        Require(photo.GetPixel(10, 10).R > 200 && photo.GetPixel(size.Width - 10, 10).G > 200
+            && photo.GetPixel(10, size.Height - 10).B > 200 && photo.GetPixel(size.Width - 10, size.Height - 10).R > 200,
+            "photo captures all four region corners without the toolbar or frame");
     }
 
     private static async Task CaptureScreenshot(Rectangle bounds, string name, CaptureFrame frame)

@@ -26,6 +26,26 @@ internal static class LanguageSelfTest
                 bool english = language == "en";
                 Check(UiText.IsEnglish == english, "Stored language applied");
                 Check(form.Controls.OfType<Button>().Any(b => b.Text == (english ? "REC" : "錄影")), "Record button translated");
+                Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Take photo" : "拍照") && b.Image != null), "Photo button translated and has an icon");
+                foreach (int width in new[] { 320, 359, 360, 485 })
+                {
+                    form.Width = width;
+                    var toolbar = form.Controls.OfType<Button>().Where(b => b.Width > 0 && (b.AccessibleName != (english ? "Select recording area" : "選取錄製區域") || width >= 360)).ToArray();
+                    foreach (var button in toolbar)
+                    {
+                        Check(button.Left >= 0 && button.Right <= form.Width, "Toolbar button stays inside frame");
+                        Check(toolbar.All(other => other == button || !other.Bounds.IntersectsWith(button.Bounds)), "Toolbar buttons do not overlap");
+                    }
+                    using var bar = new Bitmap(width, CaptureFrame.Toolbar);
+                    foreach (var button in toolbar)
+                    {
+                        using var tile = new Bitmap(button.Width, button.Height);
+                        button.DrawToBitmap(tile, new Rectangle(Point.Empty, tile.Size));
+                        using var graphics = Graphics.FromImage(bar);
+                        graphics.DrawImageUnscaled(tile, button.Location);
+                    }
+                    bar.Save(Path.Combine(directory, $"toolbar-{language}-{width}.png"));
+                }
                 Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Select recording area" : "選取錄製區域")), "Accessibility translated");
                 typeof(CaptureFrame).GetMethod("BuildMenu", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, null);
                 var menu = (ContextMenuStrip)typeof(CaptureFrame).GetField("menu", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
