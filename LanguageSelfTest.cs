@@ -52,7 +52,8 @@ internal static class LanguageSelfTest
                 string[] labels = menu.Items.Cast<ToolStripItem>().Select(i => i.Text ?? "").ToArray();
                 Check(labels.Any(s => s.StartsWith(english ? "Format:" : "格式：")), "Format menu translated");
                 Check(labels.Contains(english ? "System audio" : "系統音效"), "System audio menu translated");
-                Check(labels.Any(s => s.StartsWith(english ? "Help / About (v0.5.0" : "Help／說明與關於（v0.5.0")), "Help displays current version");
+                string version = Application.ProductVersion.Split('+')[0];
+                Check(labels.Contains(english ? $"Help / About (v{version})" : $"Help／說明與關於（v{version}）"), "Help displays current version");
                 var languages = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == "Language / 語言");
                 Check(languages.DropDownItems.OfType<ToolStripMenuItem>().Single(i => i.Checked).Text == (english ? "English" : "繁體中文"), "Language choice checked");
                 Check(JsonSerializer.Deserialize<Preferences>(JsonSerializer.Serialize(new Preferences { Language = language }))!.Language == language, "Language serializes without modifying user settings");

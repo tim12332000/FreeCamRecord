@@ -17,7 +17,7 @@ internal static class SelfTest
     private static string directory = "";
     private static int exitCode;
 
-    internal static int Run(bool mediaOnly = false)
+    internal static int Run(bool mediaOnly = false, bool photosOnly = false)
     {
         directory = Path.Combine(Environment.CurrentDirectory, ".omx", "verification", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(directory);
@@ -27,7 +27,8 @@ internal static class SelfTest
         {
             try
             {
-                if (mediaOnly)
+                if (photosOnly) await ExercisePhotos(frame);
+                else if (mediaOnly)
                 {
                     using var pattern = new TestPattern { Bounds = frame.CaptureArea, TopMost = true };
                     pattern.Show(); frame.BringToFront();
@@ -77,6 +78,25 @@ internal static class SelfTest
         }
         mouse_event(4, 0, 0, 0, UIntPtr.Zero);
         await Task.Delay(120);
+    }
+
+    private static async Task ExercisePhotos(CaptureFrame frame)
+    {
+        var area = frame.CaptureArea;
+        using var pattern = new TestPattern { Bounds = area, TopMost = true };
+        pattern.Show(); frame.BringToFront();
+        await Task.Delay(300);
+        CheckPhoto(frame, area.Size);
+        CheckPhoto(frame, area.Size);
+        var record = frame.Controls.OfType<Button>().Single(b => b.AccessibleName == "開始錄影");
+        record.PerformClick();
+        await WaitUntil(() => record.Text.Contains("停止") && record.Enabled, "start recording for photo test");
+        CheckPhoto(frame, area.Size);
+        Require(record.Text.Contains("停止") && record.Enabled, "taking a photo preserves active recording");
+        await Task.Delay(1200);
+        record.PerformClick();
+        await WaitUntil(() => record.Text.Contains("錄影") && record.Enabled, "save recording after taking photo");
+        InspectAvi(Directory.GetFiles(directory, "*.avi").Single(), area.Size, false);
     }
 
     private static async Task Exercise(CaptureFrame frame, Preferences preferences)

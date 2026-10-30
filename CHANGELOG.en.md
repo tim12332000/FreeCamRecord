@@ -2,6 +2,14 @@
 
 [繁體中文](CHANGELOG.md) · English
 
+## 0.6.0 — 2026-10-31
+
+- Add **Take photo** (the camera icon) to save the selected region as a PNG in the configured recording output folder.
+- Allow photos during recording, with save feedback and distinct filenames for consecutive photos.
+- Preserve the exact selected photo dimensions, including odd widths and heights.
+- Adjust toolbar layout and verify non-overlapping controls in both languages and at minimum window width.
+- Add desktop integration tests for photos, consecutive saves, and photos during recording.
+
 ## 0.5.0 — 2026-10-26
 
 Public release incorporating the earlier local v0.4.x trials.

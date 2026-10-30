@@ -21,9 +21,9 @@ internal static class Program
         {
             Environment.ExitCode = BrowserTest.Run(args.Skip(1).ToArray()); return;
         }
-        if (args.Contains("--self-test") || args.Contains("--media-test"))
+        if (args.Contains("--self-test") || args.Contains("--media-test") || args.Contains("--photo-test"))
         {
-            Environment.ExitCode = SelfTest.Run(args.Contains("--media-test"));
+            Environment.ExitCode = SelfTest.Run(args.Contains("--media-test"), args.Contains("--photo-test"));
             return;
         }
         Application.Run(new CaptureFrame());
