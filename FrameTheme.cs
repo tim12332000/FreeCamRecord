@@ -22,15 +22,24 @@ internal static class FrameTheme
 
     internal static Font NewFont(float size = 9, FontStyle style = FontStyle.Regular) => new("Segoe UI", size, style);
 
-    internal static GraphicsPath RoundedRectangle(RectangleF rectangle, float radius)
+    internal static GraphicsPath RoundedRectangle(RectangleF rectangle, float radius, bool roundBottom = true)
     {
         var path = new GraphicsPath();
         float diameter = Math.Min(radius * 2, Math.Min(rectangle.Width, rectangle.Height));
         if (diameter <= 0) { path.AddRectangle(rectangle); return path; }
         path.AddArc(rectangle.Left, rectangle.Top, diameter, diameter, 180, 90);
         path.AddArc(rectangle.Right - diameter, rectangle.Top, diameter, diameter, 270, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
+        if (roundBottom)
+        {
+            path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
+        }
+        else
+        {
+            path.AddLine(rectangle.Right, rectangle.Top + diameter / 2, rectangle.Right, rectangle.Bottom);
+            path.AddLine(rectangle.Right, rectangle.Bottom, rectangle.Left, rectangle.Bottom);
+            path.AddLine(rectangle.Left, rectangle.Bottom, rectangle.Left, rectangle.Top + diameter / 2);
+        }
         path.CloseFigure();
         return path;
     }

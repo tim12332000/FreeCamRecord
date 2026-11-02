@@ -17,6 +17,10 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        if (args.Contains("--capture-affinity-test"))
+        {
+            Environment.ExitCode = CaptureAffinitySelfTest.Run(); return;
+        }
         if (args.Contains("--design-test"))
         {
             Environment.ExitCode = DesignSelfTest.Run(); return;

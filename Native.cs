@@ -9,6 +9,8 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
     [DllImport("user32.dll")] internal static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] internal static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
+    [DllImport("user32.dll")] internal static extern bool GetWindowDisplayAffinity(IntPtr hwnd, out uint affinity);
+    [DllImport("dwmapi.dll")] internal static extern int DwmFlush();
     [DllImport("user32.dll")] internal static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] internal static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr hwnd);

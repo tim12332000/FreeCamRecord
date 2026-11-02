@@ -32,6 +32,11 @@ internal static class DesignSelfTest
                 frame.Width = 320;
                 Application.DoEvents();
                 RenderFrame(frame, "frame-compact-" + language + ".png");
+                typeof(CaptureFrame).GetField("toolbarInsideSelection", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(frame, true);
+                Invoke(frame, "UpdateFrame");
+                RenderFrame(frame, "frame-inside-" + language + ".png");
+                typeof(CaptureFrame).GetField("toolbarInsideSelection", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(frame, false);
+                Invoke(frame, "UpdateFrame");
                 frame.Hide();
                 RenderSelector(language);
                 using var document = CreateDocument(new Size(800, 450));
@@ -78,6 +83,15 @@ internal static class DesignSelfTest
     private static void RenderFrame(CaptureFrame frame, string filename)
     {
         var capture = frame.CaptureArea;
+        int toolbarBottom = CaptureFrame.Toolbar + (Field<bool>(frame, "toolbarInsideSelection") ? CaptureFrame.Edge : 0);
+        for (int y = toolbarBottom - 10; y < toolbarBottom + CaptureFrame.Edge; y++)
+            for (int x = 0; x < CaptureFrame.Edge; x++)
+                Check(frame.Region!.IsVisible(x, y) && frame.Region.IsVisible(frame.Width - x - 1, y),
+                    $"Toolbar joins both frame edges without a notch: {filename} x={x}, y={y}, width={frame.Width}");
+        for (int x = 0; x < 12; x++)
+            for (int y = 0; y < 12; y++)
+                Check(frame.Region!.IsVisible(x, y) && frame.Region.IsVisible(frame.Width - x - 1, y),
+                    "Toolbar has continuous square top corners: " + filename);
         using var backdrop = CreateDesktop(new Size(800, 540));
         using var rendered = new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppRgb);
         frame.DrawToBitmap(rendered, new Rectangle(Point.Empty, rendered.Size));

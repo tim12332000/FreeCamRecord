@@ -114,8 +114,8 @@ internal sealed class CaptureFrame : Form
         Resize += (_, _) => UpdateFrame();
         Shown += (_, _) =>
         {
-            // Extra protection on Windows 10 2004+; geometry already keeps the frame outside capture.
-            excludedFromCapture = Native.SetWindowDisplayAffinity(Handle, 0x11);
+            // Windows Snipping Tool must be able to capture the toolbar while idle.
+            SetCaptureExclusion(false);
             UpdateFrame();
         };
         FormClosing += ClosingFrame;
@@ -183,8 +183,8 @@ internal sealed class CaptureFrame : Form
         if (Width <= 0 || Height <= Toolbar + Edge) return;
         int barOffset = toolbarInsideSelection ? Edge : 0;
         int barHeight = Toolbar + barOffset;
-        using var toolbarShape = FrameTheme.RoundedRectangle(new RectangleF(0, 0, Width, barHeight), 10);
-        var shape = new Region(toolbarShape);
+        // Native window regions have binary edges, so curved clipping creates visible steps.
+        var shape = new Region(new Rectangle(0, 0, Width, barHeight));
         shape.Union(new Rectangle(0, barHeight, Edge, Height - barHeight));
         shape.Union(new Rectangle(Width - Edge, barHeight, Edge, Height - barHeight));
         shape.Union(new Rectangle(0, Height - Edge, Width, Edge));
@@ -216,12 +216,11 @@ internal sealed class CaptureFrame : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        e.Graphics.SmoothingMode = SmoothingMode.None;
         var color = session == null ? FrameTheme.IdleBorder : FrameTheme.RecordingBorder;
         int barHeight = Toolbar + (toolbarInsideSelection ? Edge : 0);
         using var outline = new Pen(FrameTheme.Border);
-        using var toolbarShape = FrameTheme.RoundedRectangle(new RectangleF(.5f, .5f, Width - 1, barHeight - 1), 10);
-        e.Graphics.DrawPath(outline, toolbarShape);
+        e.Graphics.DrawRectangle(outline, 0, 0, Width - 1, barHeight - 1);
         using var border = new Pen(color);
         e.Graphics.DrawRectangle(border, Edge - 1, barHeight - 1, Width - Edge * 2 + 1, Height - barHeight - Edge + 1);
         using var corner = new Pen(color, 2);
@@ -466,6 +465,21 @@ internal sealed class CaptureFrame : Form
         Top = Math.Clamp(Top, desktop.Top, Math.Max(desktop.Top, desktop.Bottom - Height));
     }
 
+    private bool SetCaptureExclusion(bool exclude)
+    {
+        if (IsDisposed || Disposing) return false;
+        bool applied = Native.SetWindowDisplayAffinity(Handle, exclude ? 0x11u : 0u);
+        if (applied)
+        {
+            excludedFromCapture = exclude;
+            // Ensure the compositor applies the change before the first frame is read.
+            Native.DwmFlush();
+        }
+        if (exclude && toolbarInsideSelection && !applied)
+            throw new InvalidOperationException(UiText.T("此系統無法隱藏選區內的工具列，請在畫面上方留一點空間後重新選取。", "This system cannot exclude the toolbar from capture. Leave space above the area for the toolbar and select again."));
+        return applied;
+    }
+
     private void TakePhoto()
     {
         if (busy || selecting) return;
@@ -477,6 +491,7 @@ internal sealed class CaptureFrame : Form
         }
         try
         {
+            SetCaptureExclusion(true);
             tips.Hide(this);
             Directory.CreateDirectory(settings.Directory);
             using var capture = new DesktopCapture(area);
@@ -496,7 +511,13 @@ internal sealed class CaptureFrame : Form
         }
         catch (Exception ex)
         {
+            if (session == null) SetCaptureExclusion(false);
             MessageBox.Show(this, UiText.T($"無法儲存照片：{ex.Message}", $"Cannot save photo: {ex.Message}"), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            // A photo taken during recording must retain the recording's exclusion.
+            if (session == null) SetCaptureExclusion(false);
         }
     }
 
@@ -523,6 +544,7 @@ internal sealed class CaptureFrame : Form
         var recording = new ScreenRecorder(CaptureArea, settings.Directory, settings.SystemAudio, settings.Microphone, targetFps, settings.Format);
         try
         {
+            SetCaptureExclusion(true);
             await recording.StartAsync();
             session = recording; busy = false;
             recordButton.Enabled = true; recordButton.Text = UiText.T("停止", "Stop"); recordButton.Image = Artwork(ArtIcon.Stop); recordButton.AccessibleName = UiText.T("停止錄影", "Stop recording");
@@ -533,6 +555,7 @@ internal sealed class CaptureFrame : Form
         }
         catch (Exception ex)
         {
+            SetCaptureExclusion(false);
             busy = false; recordButton.Enabled = true; sizeButton.Enabled = true; UpdateStatus();
             MessageBox.Show(this, UiText.T($"無法開始錄影：{ex.Message}\n\n若音訊裝置無法使用，可在選單關閉相應聲音後重試。", $"Cannot start recording: {ex.Message}\n\nIf an audio device is unavailable, disable that audio source in the menu and try again."), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             if (closeRequested) Close();
@@ -576,8 +599,16 @@ internal sealed class CaptureFrame : Form
             {
                 var area = picker.SelectedArea;
                 bool inside = area.Top - Screen.FromRectangle(area).Bounds.Top < Toolbar;
-                if (inside && !excludedFromCapture)
-                    throw new InvalidOperationException(UiText.T("此系統無法隱藏選區內的工具列，請在畫面上方留一點空間後重新選取。", "This system cannot exclude the toolbar from capture. Leave space above the area for the toolbar and select again."));
+                if (inside)
+                {
+                    // Probe support while hidden; never leave an idle toolbar protected.
+                    try
+                    {
+                        if (!SetCaptureExclusion(true))
+                            throw new InvalidOperationException(UiText.T("此系統無法隱藏選區內的工具列，請在畫面上方留一點空間後重新選取。", "This system cannot exclude the toolbar from capture. Leave space above the area for the toolbar and select again."));
+                    }
+                    finally { SetCaptureExclusion(false); }
+                }
                 toolbarInsideSelection = inside;
                 MinimumSize = new Size(320, inside ? 128 : 120 + Toolbar + Edge);
                 Bounds = new Rectangle(area.Left - Edge, area.Top - CaptureTopInset, area.Width + Edge * 2, area.Height + CaptureVerticalMargin);
@@ -591,6 +622,7 @@ internal sealed class CaptureFrame : Form
     private async Task ObserveCompletion(ScreenRecorder recording)
     {
         var result = await recording.Completion;
+        SetCaptureExclusion(false);
         session = null; busy = false; sizeButton.Enabled = true; recordButton.Enabled = true;
         recordButton.Text = UiText.T("錄影", "REC"); recordButton.Image = Artwork(ArtIcon.Record); recordButton.AccessibleName = UiText.T("開始錄影", "Start recording");
         lastSaved = result.Path;

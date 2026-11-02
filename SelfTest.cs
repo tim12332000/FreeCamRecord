@@ -343,8 +343,11 @@ internal static class SelfTest
 
     private static void CheckPhoto(CaptureFrame frame, Size size)
     {
+        Require(Native.GetWindowDisplayAffinity(frame.Handle, out uint affinityBefore), "photo can query initial window affinity");
         var before = Directory.GetFiles(directory, "Photo-*.png").ToHashSet();
         frame.Controls.OfType<Button>().Single(b => b.AccessibleName == "拍照").PerformClick();
+        Require(Native.GetWindowDisplayAffinity(frame.Handle, out uint affinityAfter) && affinityAfter == affinityBefore,
+            "photo restores idle affinity or preserves active recording exclusion");
         var added = Directory.GetFiles(directory, "Photo-*.png").Where(path => !before.Contains(path)).ToArray();
         Require(added.Length == 1, "photo button saves a unique PNG in the configured output folder");
         using var photo = new Bitmap(added[0]);
@@ -356,6 +359,7 @@ internal static class SelfTest
 
     private static async Task CaptureScreenshot(Rectangle bounds, string name, CaptureFrame frame)
     {
+        Require(Native.GetWindowDisplayAffinity(frame.Handle, out uint previousAffinity), "verification screenshot can query window affinity");
         bool affinity = Native.SetWindowDisplayAffinity(frame.Handle, 0);
         results.Add($"AFFINITY RESET: {affinity}");
         frame.Refresh();
@@ -364,7 +368,7 @@ internal static class SelfTest
         using var graphics = Graphics.FromImage(image);
         graphics.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
         image.Save(Path.Combine(directory, name));
-        Native.SetWindowDisplayAffinity(frame.Handle, 0x11);
+        Native.SetWindowDisplayAffinity(frame.Handle, previousAffinity);
     }
 
     private static void InspectAvi(string path, Size size, bool expectAudio, int fps = 15)
