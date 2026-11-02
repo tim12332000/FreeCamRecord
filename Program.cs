@@ -17,6 +17,14 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        if (args.Contains("--design-test"))
+        {
+            Environment.ExitCode = DesignSelfTest.Run(); return;
+        }
+        if (args.Contains("--snip-test"))
+        {
+            Environment.ExitCode = SnipSelfTest.Run(); return;
+        }
         if (args.Length > 0 && args[0] == "--browser-test")
         {
             Environment.ExitCode = BrowserTest.Run(args.Skip(1).ToArray()); return;

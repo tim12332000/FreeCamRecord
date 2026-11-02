@@ -28,17 +28,21 @@ internal static class LanguageSelfTest
                 Check(form.Controls.OfType<Button>().Any(b => b.Text == (english ? "REC" : "錄影")), "Record button translated");
                 Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Take photo" : "拍照") && b.Image != null), "Photo button translated and has an icon");
                 Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Minimize" : "最小化") && b.Image != null), "Minimize button translated and has an icon");
+                Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Snip screenshot" : "剪取截圖") && b.Image != null), "Scissors button translated and has an icon");
                 Check(form.ShowInTaskbar && form.MinimizeBox, "Minimized frame remains available in taskbar");
-                foreach (int width in new[] { 320, 359, 360, 395, 396, 485 })
+                foreach (int width in new[] { 320, 355, 356, 395, 396, 431, 432, 485 })
                 {
                     form.Width = width;
-                    var toolbar = form.Controls.OfType<Button>().Where(b => b.Width > 0 && (b.AccessibleName != (english ? "Select recording area" : "選取錄製區域") || width >= 396)).ToArray();
+                    var toolbar = form.Controls.OfType<Button>().Where(b => b.Width > 0 &&
+                        (b.AccessibleName != (english ? "Select recording area" : "選取錄製區域") || width >= 432) &&
+                        (b.AccessibleName != (english ? "Take photo" : "拍照") || width >= 356)).ToArray();
                     foreach (var button in toolbar)
                     {
                         Check(button.Left >= 0 && button.Right <= form.Width, "Toolbar button stays inside frame");
                         Check(toolbar.All(other => other == button || !other.Bounds.IntersectsWith(button.Bounds)), "Toolbar buttons do not overlap");
                     }
                     using var bar = new Bitmap(width, CaptureFrame.Toolbar);
+                    using (var background = Graphics.FromImage(bar)) background.Clear(FrameTheme.Toolbar);
                     foreach (var button in toolbar)
                     {
                         using var tile = new Bitmap(button.Width, button.Height);
@@ -71,19 +75,29 @@ internal static class LanguageSelfTest
                 typeof(RegionSelector).GetField("selection", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(selector, new Rectangle(350, 80, 580, 600));
                 typeof(RegionSelector).GetField("pointer", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(selector, new Point(650, 300));
                 typeof(RegionSelector).GetMethod("RefreshInstructions", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(selector, null);
-                var panel = selector.Controls.OfType<Panel>().Single(); panel.Location = new Point(300, 615);
+                var panel = selector.Controls.OfType<Panel>().Single(); panel.Location = new Point(300, 565);
                 foreach (var label in panel.Controls.OfType<Label>()) Check(TextRenderer.MeasureText(label.Text, label.Font).Width + 4 <= label.Width, "Selection instruction fits");
                 using var preview = new Bitmap(1280, 720);
                 using (var graphics = Graphics.FromImage(preview))
                 {
                     typeof(RegionSelector).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(selector, new object[] { new PaintEventArgs(graphics, new Rectangle(Point.Empty, preview.Size)) });
-                    using var background = new SolidBrush(panel.BackColor); graphics.FillRectangle(background, panel.Bounds);
+                    if (panel is StudioPanel surface)
+                    {
+                        using var shape = FrameTheme.RoundedRectangle(panel.Bounds, surface.CornerRadius);
+                        using var fill = new SolidBrush(surface.FillColor);
+                        graphics.FillPath(fill, shape);
+                    }
                     foreach (Control control in panel.Controls)
                     {
                         var bounds = control.Bounds; bounds.Offset(panel.Location);
-                        using var fill = new SolidBrush(control.BackColor.A == 0 ? panel.BackColor : control.BackColor);
-                        graphics.FillRectangle(fill, bounds);
-                        TextRenderer.DrawText(graphics, control.Text, control.Font, bounds, control.ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                        if (control is Button)
+                        {
+                            using var tile = new Bitmap(control.Width, control.Height);
+                            control.DrawToBitmap(tile, new Rectangle(Point.Empty, tile.Size));
+                            graphics.DrawImageUnscaled(tile, bounds.Location);
+                        }
+                        else
+                            TextRenderer.DrawText(graphics, control.Text, control.Font, bounds, control.ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                     }
                 }
                 preview.Save(Path.Combine(directory, "selection-" + language + ".png"));

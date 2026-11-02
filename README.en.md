@@ -13,6 +13,7 @@ Download the Windows x64 ZIP from [GitHub Releases](https://github.com/tim123320
 - The frame is transparent and lets you operate the application underneath. There is no video preview.
 - Click **REC**, then **Stop** to save automatically. The default destination is `Videos\FreeCamRecord` in your user profile. Click **Saved** or use the menu to open the folder.
 - Click **Take photo** (the camera icon) to save the selected area as a PNG in the same output folder. Photos can also be taken while recording.
+- Click **Snip screenshot** (scissors), drag an area and release to open a screenshot preview. **Save** chooses a PNG destination; **Copy** puts the image on the clipboard. Ctrl+S saves, Ctrl+C copies, and Esc closes the preview. Snipping is disabled during recording to keep the selection interface out of the video. On narrow toolbars, Take photo remains available in the menu.
 - The menu controls format, target frame rate, save location, system audio, and microphone. Defaults are MP4, Auto FPS, system audio on, and microphone off.
 - In v0.5.0, choose **Language / 語言 → English / 繁體中文**. The choice is saved for future launches; Traditional Chinese remains the default. Buttons, tooltips, selection controls, errors, and Help follow the selected language.
 - **Help / About** shows the running version and usage instructions. It is disabled during recording to preserve the source application's focus. Windows-provided dialogs and native error details may follow the Windows display language.

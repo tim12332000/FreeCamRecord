@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Imaging;
+using System.Drawing.Drawing2D;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -36,8 +37,8 @@ internal sealed class Preferences
 
 internal sealed class CaptureFrame : Form
 {
-    internal const int Edge = 4, Toolbar = 36;
-    private readonly Button menuButton = MakeButton(""), selectButton = MakeButton(""), sizeButton = MakeButton(""), photoButton = MakeButton(""), recordButton = MakeButton(""), minimizeButton = MakeButton(""), closeButton = MakeButton("");
+    internal const int Edge = 4, Toolbar = 44;
+    private readonly Button menuButton = MakeButton(""), selectButton = MakeButton(""), sizeButton = MakeButton(""), photoButton = MakeButton(""), snipButton = MakeButton(""), recordButton = MakeButton(""), minimizeButton = MakeButton(""), closeButton = MakeButton("");
     private readonly Dictionary<(ArtIcon Icon, bool Accent), Bitmap> artwork = new();
     private readonly Icon appIcon;
     private readonly ContextMenuStrip menu = new();
@@ -73,15 +74,17 @@ internal sealed class CaptureFrame : Form
         MinimizeBox = true;
         ShowInTaskbar = true;
         StartPosition = FormStartPosition.Manual;
-        MinimumSize = new Size(320, 160);
+        MinimumSize = new Size(320, 120 + Toolbar + Edge);
         TopMost = true;
         BackColor = FrameTheme.Toolbar;
         ForeColor = FrameTheme.Text;
-        Font = new Font("Microsoft JhengHei UI", 9);
+        Font = FrameTheme.NewFont();
         DoubleBuffered = true;
         Bounds = new Rectangle(100, 100, 477 + Edge * 2, 430 + Toolbar + Edge);
-        Controls.AddRange(new Control[] { menuButton, selectButton, sizeButton, photoButton, recordButton, minimizeButton, closeButton });
-        FrameTheme.ApplyButton(recordButton, primary: true);
+        Controls.AddRange(new Control[] { menuButton, selectButton, sizeButton, photoButton, snipButton, recordButton, minimizeButton, closeButton });
+        FrameTheme.ApplyRecordingButton(recordButton);
+        FrameTheme.ApplyWindowButton(minimizeButton);
+        FrameTheme.ApplyWindowButton(closeButton, close: true);
         menuButton.Image = Artwork(ArtIcon.Menu);
         selectButton.Image = Artwork(ArtIcon.Size);
         closeButton.Image = Artwork(ArtIcon.Close);
@@ -89,6 +92,8 @@ internal sealed class CaptureFrame : Form
         minimizeButton.ImageAlign = ContentAlignment.MiddleCenter;
         photoButton.Image = Artwork(ArtIcon.Camera);
         photoButton.ImageAlign = ContentAlignment.MiddleCenter;
+        snipButton.Image = Artwork(ArtIcon.Scissors);
+        snipButton.ImageAlign = ContentAlignment.MiddleCenter;
         menuButton.ImageAlign = selectButton.ImageAlign = closeButton.ImageAlign = ContentAlignment.MiddleCenter;
         recordButton.Image = Artwork(ArtIcon.Record);
         recordButton.ImageAlign = ContentAlignment.MiddleCenter;
@@ -100,6 +105,7 @@ internal sealed class CaptureFrame : Form
         selectButton.Click += async (_, _) => await SelectRegion();
         sizeButton.Click += (_, _) => EditSize();
         photoButton.Click += (_, _) => TakePhoto();
+        snipButton.Click += async (_, _) => await SnipScreenshot();
         recordButton.Click += async (_, _) => await ToggleRecording();
         closeButton.Click += (_, _) => Close();
         minimizeButton.Click += (_, _) => WindowState = FormWindowState.Minimized;
@@ -134,7 +140,7 @@ internal sealed class CaptureFrame : Form
 
     private static Button MakeButton(string text)
     {
-        var button = new Button { Text = text };
+        var button = new StudioButton { Text = text };
         FrameTheme.ApplyButton(button);
         return button;
     }
@@ -145,6 +151,7 @@ internal sealed class CaptureFrame : Form
         selectButton.AccessibleName = UiText.T("選取錄製區域", "Select recording area");
         sizeButton.AccessibleName = UiText.T("錄影範圍尺寸", "Recording dimensions");
         photoButton.AccessibleName = UiText.T("拍照", "Take photo");
+        snipButton.AccessibleName = UiText.T("剪取截圖", "Snip screenshot");
         recordButton.AccessibleName = session == null ? UiText.T("開始錄影", "Start recording") : UiText.T("停止錄影", "Stop recording");
         closeButton.AccessibleName = UiText.T("關閉", "Close");
         minimizeButton.AccessibleName = UiText.T("最小化", "Minimize");
@@ -153,6 +160,7 @@ internal sealed class CaptureFrame : Form
         tips.SetToolTip(selectButton, UiText.T("滑鼠指向預選區域；也可直接拖曳框選", "Hover to preview an area, or drag to select"));
         tips.SetToolTip(sizeButton, UiText.T("點擊輸入尺寸；拖曳邊角調整範圍", "Click to enter dimensions; drag edges to resize"));
         tips.SetToolTip(photoButton, UiText.T("拍照：將目前框選範圍儲存為 PNG（錄影中也可使用）", "Take photo: save the selected area as PNG (also available while recording)"));
+        tips.SetToolTip(snipButton, UiText.T("剪取截圖：框選後預覽，可儲存或複製", "Snip: select an area, then preview, save or copy"));
         tips.SetToolTip(closeButton, UiText.T("關閉；錄影中會先停止並儲存", "Close; an active recording will be stopped and saved first"));
         tips.SetToolTip(minimizeButton, UiText.T("最小化到工作列；錄影會繼續", "Minimize to taskbar; recording continues"));
         UpdateStatus();
@@ -175,25 +183,31 @@ internal sealed class CaptureFrame : Form
         if (Width <= 0 || Height <= Toolbar + Edge) return;
         int barOffset = toolbarInsideSelection ? Edge : 0;
         int barHeight = Toolbar + barOffset;
-        var shape = new Region(new Rectangle(0, 0, Width, barHeight));
+        using var toolbarShape = FrameTheme.RoundedRectangle(new RectangleF(0, 0, Width, barHeight), 10);
+        var shape = new Region(toolbarShape);
         shape.Union(new Rectangle(0, barHeight, Edge, Height - barHeight));
         shape.Union(new Rectangle(Width - Edge, barHeight, Edge, Height - barHeight));
         shape.Union(new Rectangle(0, Height - Edge, Width, Edge));
         var previous = Region;
         Region = shape;
         previous?.Dispose();
-        bool showSelector = Width >= 396;
+        bool showSelector = Width >= 432;
+        bool showPhoto = Width >= 356;
         selectButton.Visible = showSelector;
-        menuButton.SetBounds(3, barOffset + 2, 32, Toolbar - 4);
-        selectButton.SetBounds(38, barOffset + 2, 32, Toolbar - 4);
+        photoButton.Visible = showPhoto;
+        menuButton.SetBounds(3, barOffset + 6, 32, 30);
+        selectButton.SetBounds(38, barOffset + 6, 32, 30);
         int sizeLeft = showSelector ? 76 : 38;
         int recordWidth = showSelector ? 87 : 75;
         int recordLeft = Width - 76 - recordWidth;
-        sizeButton.SetBounds(sizeLeft, barOffset + 2, Math.Min(118, recordLeft - 36 - sizeLeft - 4), Toolbar - 4);
-        photoButton.SetBounds(recordLeft - 36, barOffset + 2, 32, Toolbar - 4);
-        recordButton.SetBounds(recordLeft, barOffset + 3, recordWidth, Toolbar - 6);
-        minimizeButton.SetBounds(Width - 72, barOffset + 2, 32, Toolbar - 4);
-        closeButton.SetBounds(Width - 36, barOffset + 2, 32, Toolbar - 4);
+        int snipLeft = recordLeft - (showPhoto ? 72 : 36);
+        sizeButton.SetBounds(sizeLeft, barOffset + 6, Math.Min(118, snipLeft - sizeLeft - 4), 30);
+        sizeButton.ForeColor = FrameTheme.MutedText;
+        photoButton.SetBounds(recordLeft - 36, barOffset + 6, 32, 30);
+        snipButton.SetBounds(snipLeft, barOffset + 6, 32, 30);
+        recordButton.SetBounds(recordLeft, barOffset + 6, recordWidth, 30);
+        minimizeButton.SetBounds(Width - 72, barOffset + 6, 32, 30);
+        closeButton.SetBounds(Width - 36, barOffset + 6, 32, 30);
         savedUntil = DateTime.MinValue;
         UpdateStatus();
         Invalidate();
@@ -202,12 +216,21 @@ internal sealed class CaptureFrame : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var brush = new SolidBrush(session == null ? FrameTheme.IdleBorder : FrameTheme.RecordingBorder);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var color = session == null ? FrameTheme.IdleBorder : FrameTheme.RecordingBorder;
         int barHeight = Toolbar + (toolbarInsideSelection ? Edge : 0);
-        e.Graphics.FillRectangle(brush, 0, barHeight - Edge, Width, Edge);
-        e.Graphics.FillRectangle(brush, 0, barHeight, Edge, Height - barHeight);
-        e.Graphics.FillRectangle(brush, Width - Edge, barHeight, Edge, Height - barHeight);
-        e.Graphics.FillRectangle(brush, 0, Height - Edge, Width, Edge);
+        using var outline = new Pen(FrameTheme.Border);
+        using var toolbarShape = FrameTheme.RoundedRectangle(new RectangleF(.5f, .5f, Width - 1, barHeight - 1), 10);
+        e.Graphics.DrawPath(outline, toolbarShape);
+        using var border = new Pen(color);
+        e.Graphics.DrawRectangle(border, Edge - 1, barHeight - 1, Width - Edge * 2 + 1, Height - barHeight - Edge + 1);
+        using var corner = new Pen(color, 2);
+        foreach (int x in new[] { Edge - 1, Width - Edge })
+            foreach (int y in new[] { barHeight - 1, Height - Edge })
+            {
+                e.Graphics.DrawLine(corner, x, y, x + (x < Width / 2 ? 9 : -9), y);
+                e.Graphics.DrawLine(corner, x, y, x, y + (y < Height / 2 ? 9 : -9));
+            }
     }
 
     private int ResizeEdges(Point point)
@@ -274,12 +297,14 @@ internal sealed class CaptureFrame : Form
     private void UpdateStatus()
     {
         photoButton.Enabled = !busy && !selecting;
+        snipButton.Enabled = session == null && !busy && !selecting;
         photoButton.Image = Artwork(DateTime.Now < photoSavedUntil ? ArtIcon.Check : ArtIcon.Camera);
         if (busy) return;
         bool saved = DateTime.Now < savedUntil;
         sizeButton.Text = session != null ? $"{session.Elapsed:hh\\:mm\\:ss}" :
             saved ? UiText.T("已儲存", "Saved") : $"{CaptureArea.Width} × {CaptureArea.Height}";
         sizeButton.Image = session != null ? Artwork(ArtIcon.Record, true) : saved ? Artwork(ArtIcon.Check) : null;
+        sizeButton.ForeColor = session != null ? FrameTheme.Text : saved ? FrameTheme.Accent : FrameTheme.MutedText;
     }
 
     private void MaintainTopMost()
@@ -305,7 +330,10 @@ internal sealed class CaptureFrame : Form
         bool editable = session == null && !busy;
         var pick = new ToolStripMenuItem(UiText.T("選取錄製區域…", "Select recording area…")) { Image = Artwork(ArtIcon.Size), Enabled = editable };
         pick.Click += async (_, _) => await SelectRegion();
-        menu.Items.Add(pick); menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(pick);
+        var photo = new ToolStripMenuItem(UiText.T("拍照", "Take photo")) { Image = Artwork(ArtIcon.Camera), Enabled = !busy && !selecting };
+        photo.Click += (_, _) => TakePhoto();
+        menu.Items.Add(photo); menu.Items.Add(new ToolStripSeparator());
         var format = new ToolStripMenuItem(UiText.T($"格式：{settings.Format.ToUpperInvariant()}", $"Format: {settings.Format.ToUpperInvariant()}")) { Image = Artwork(ArtIcon.Size), Enabled = editable };
         foreach (string extension in new[] { "mp4", "avi" })
         {
@@ -356,10 +384,30 @@ internal sealed class CaptureFrame : Form
         var help = menu.Items.Add(UiText.T($"Help／說明與關於（v{Application.ProductVersion.Split('+')[0]}）", $"Help / About (v{Application.ProductVersion.Split('+')[0]})"));
         help.AccessibleName = UiText.T("說明與版本資訊", "Help and version information");
         help.Enabled = editable;
-        help.Click += (_, _) => MessageBox.Show(this,
-            UiText.T($"FreeCamRecord\n版本：{Application.ProductVersion.Split('+')[0]}\n\n選區：按取景框圖示，滑鼠指向預選，按確定採用；也可拖曳框選。\n微調：拖工具列移動，拉邊或角落調整大小。\n錄影：按錄影開始，停止後自動儲存。\n\n格式、FPS、聲音與儲存位置都在選單內。",
-                $"FreeCamRecord\nVersion: {Application.ProductVersion.Split('+')[0]}\n\nSelect: click the frame icon, hover to preview an area, then confirm. You can also drag a rectangle.\nAdjust: drag the toolbar to move; drag edges or corners to resize.\nRecord: click REC to start and Stop to save automatically.\n\nFormat, FPS, audio, output folder and language are in the menu."),
-            UiText.T("說明與關於 FreeCamRecord", "Help / About FreeCamRecord"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        help.Click += (_, _) => ShowHelp();
+    }
+
+    private void ShowHelp()
+    {
+        using var dialog = new StudioDialog("FreeCamRecord", new Size(520, 448)) { Icon = appIcon };
+        dialog.Controls.Add(new Label { Text = UiText.T("版本 ", "Version ") + Application.ProductVersion.Split('+')[0], ForeColor = FrameTheme.MutedText, Bounds = new Rectangle(24, 54, 450, 24) });
+        var sections = new[]
+        {
+            (Title: UiText.T("錄製畫面", "Record your screen"), Body: UiText.T("選取錄製區域，或拖曳邊框調整。按錄影開始，按停止自動存檔。格式、聲音與儲存位置都在選單內。", "Select an area or adjust the frame edges. REC starts recording; Stop saves it. Format, audio and output folder are in the menu.")),
+            (Title: UiText.T("剪取與拍照", "Snip and capture"), Body: UiText.T("剪刀可自由框選截圖，再從預覽儲存或複製。相機會儲存目前框內畫面，錄影中也能拍照。", "Use scissors to snip an area, then Save or Copy from preview. The camera saves the current framed area, including while recording.")),
+            (Title: UiText.T("視窗與快捷鍵", "Window and shortcuts"), Body: UiText.T("最小化後可從工作列還原，錄影會繼續。截圖預覽中：Ctrl+S 儲存、Ctrl+C 複製、Esc 關閉。", "Minimize keeps recording running; restore from the taskbar. In screenshot preview: Ctrl+S saves, Ctrl+C copies, Esc closes."))
+        };
+        for (int index = 0; index < sections.Length; index++)
+        {
+            int y = 100 + index * 88;
+            dialog.Controls.Add(new Label { Text = sections[index].Title, Font = FrameTheme.NewFont(9, FontStyle.Bold), ForeColor = FrameTheme.Text, Bounds = new Rectangle(24, y, 472, 24) });
+            dialog.Controls.Add(new Label { Text = sections[index].Body, ForeColor = FrameTheme.MutedText, Bounds = new Rectangle(24, y + 28, 472, 48) });
+        }
+        var close = MakeButton(UiText.T("知道了", "Got it"));
+        FrameTheme.ApplyButton(close, primary: true);
+        close.SetBounds(392, 390, 104, 34); close.DialogResult = DialogResult.OK;
+        dialog.Controls.Add(close); dialog.AcceptButton = close; dialog.CancelButton = close;
+        dialog.ShowDialog(this);
     }
 
     private void SaveSettings()
@@ -382,20 +430,34 @@ internal sealed class CaptureFrame : Form
     {
         if (session != null || busy) return;
         if (DateTime.Now < savedUntil && lastSaved != null) { OpenFolder(); return; }
-        using var dialog = new Form { Text = UiText.T("錄影尺寸（像素）", "Recording size (pixels)"), Icon = appIcon, BackColor = FrameTheme.Toolbar, ForeColor = FrameTheme.Text, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(290, 145), MinimizeBox = false, MaximizeBox = false, Font = Font };
+        using var dialog = new StudioDialog(UiText.T("錄影尺寸（像素）", "Recording size (pixels)"), new Size(360, 224)) { Icon = appIcon };
         var desktop = SystemInformation.VirtualScreen;
         int minWidth = MinimumSize.Width - Edge * 2, minHeight = MinimumSize.Height - CaptureVerticalMargin;
         int maxWidth = Math.Max(minWidth, desktop.Width - Edge * 2);
         int maxHeight = Math.Max(minHeight, desktop.Height - CaptureVerticalMargin);
-        var width = new NumericUpDown { AccessibleName = UiText.T("寬度", "Width"), BackColor = FrameTheme.Hover, ForeColor = FrameTheme.Text, BorderStyle = BorderStyle.FixedSingle, Minimum = minWidth, Maximum = maxWidth, Value = Math.Clamp(CaptureArea.Width, minWidth, maxWidth), Bounds = new Rectangle(20, 46, 110, 28) };
-        var height = new NumericUpDown { AccessibleName = UiText.T("高度", "Height"), BackColor = FrameTheme.Hover, ForeColor = FrameTheme.Text, BorderStyle = BorderStyle.FixedSingle, Minimum = minHeight, Maximum = maxHeight, Value = Math.Clamp(CaptureArea.Height, minHeight, maxHeight), Bounds = new Rectangle(160, 46, 110, 28) };
+        var width = new NumericUpDown { AccessibleName = UiText.T("寬度", "Width"), BackColor = FrameTheme.SurfaceRaised, ForeColor = FrameTheme.Text, BorderStyle = BorderStyle.FixedSingle, Font = FrameTheme.NewFont(12), Minimum = minWidth, Maximum = maxWidth, Value = Math.Clamp(CaptureArea.Width, minWidth, maxWidth), Bounds = new Rectangle(24, 100, 144, 36) };
+        var height = new NumericUpDown { AccessibleName = UiText.T("高度", "Height"), BackColor = FrameTheme.SurfaceRaised, ForeColor = FrameTheme.Text, BorderStyle = BorderStyle.FixedSingle, Font = FrameTheme.NewFont(12), Minimum = minHeight, Maximum = maxHeight, Value = Math.Clamp(CaptureArea.Height, minHeight, maxHeight), Bounds = new Rectangle(192, 100, 144, 36) };
         var confirm = MakeButton(UiText.T("確定", "OK"));
         FrameTheme.ApplyButton(confirm, primary: true);
-        confirm.Image = Artwork(ArtIcon.Check); confirm.DialogResult = DialogResult.OK; confirm.SetBounds(185, 96, 85, 32);
-        var cancel = MakeButton(UiText.T("取消", "Cancel")); cancel.DialogResult = DialogResult.Cancel; cancel.SetBounds(90, 96, 85, 32);
+        using var confirmationIcon = ArtIcons.Create(ArtIcon.Check, 18, FrameTheme.AccentText);
+        confirm.Image = confirmationIcon; confirm.DialogResult = DialogResult.OK; confirm.SetBounds(236, 166, 100, 34);
+        var cancel = MakeButton(UiText.T("取消", "Cancel")); cancel.DialogResult = DialogResult.Cancel; cancel.SetBounds(126, 166, 100, 34);
         dialog.Controls.AddRange(new Control[] { width, height, confirm, cancel,
-            new Label { Text = UiText.T("寬度（像素）", "Width (px)"), ForeColor = FrameTheme.MutedText, AutoSize = true, Location = new Point(20, 18) },
-            new Label { Text = UiText.T("高度（像素）", "Height (px)"), ForeColor = FrameTheme.MutedText, AutoSize = true, Location = new Point(160, 18) } });
+            new Label { Text = UiText.T("寬度（像素）", "Width (px)"), ForeColor = FrameTheme.MutedText, AutoSize = true, Location = new Point(24, 72) },
+            new Label { Text = UiText.T("高度（像素）", "Height (px)"), ForeColor = FrameTheme.MutedText, AutoSize = true, Location = new Point(192, 72) } });
+        foreach (var input in new[] { width, height })
+        {
+            var field = new StudioPanel { Bounds = new Rectangle(input.Left, 96, input.Width, 44), CornerRadius = 7 };
+            dialog.Controls.Add(field);
+            input.BorderStyle = BorderStyle.None;
+            int inputWidth = input.Width - 24;
+            field.Controls.Add(input);
+            input.SetBounds(12, 10, inputWidth, input.Height);
+            foreach (Control child in input.Controls)
+                if (child is not TextBox) child.Visible = false;
+            var arrows = new StudioSpinButtons(input);
+            input.Controls.Add(arrows); arrows.BringToFront();
+        }
         dialog.AcceptButton = confirm;
         dialog.CancelButton = cancel;
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
@@ -477,6 +539,28 @@ internal sealed class CaptureFrame : Form
         }
     }
 
+    private async Task SnipScreenshot()
+    {
+        if (session != null || busy || selecting) return;
+        selecting = true; menu.Close(); tips.Hide(this); Hide();
+        try
+        {
+            await Task.Delay(160);
+            var desktop = SystemInformation.VirtualScreen;
+            using var image = new Bitmap(desktop.Width, desktop.Height);
+            using (var graphics = Graphics.FromImage(image)) graphics.CopyFromScreen(desktop.Location, Point.Empty, desktop.Size);
+            using var picker = new RegionSelector(image, desktop.Location, new Size(1, 1), screenshotMode: true);
+            if (picker.ShowDialog() != DialogResult.OK) return;
+            var crop = picker.SelectedArea;
+            crop.Offset(-desktop.Left, -desktop.Top);
+            using var screenshot = image.Clone(crop, PixelFormat.Format32bppRgb);
+            using var preview = new SnipPreview(screenshot, settings.Directory) { Icon = appIcon };
+            preview.ShowDialog(this);
+        }
+        catch (Exception ex) { MessageBox.Show(ex.Message, UiText.T("無法剪取截圖", "Cannot snip screenshot"), MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        finally { selecting = false; Show(); UpdateFrame(); }
+    }
+
     private async Task SelectRegion()
     {
         if (session != null || busy || selecting) return;
@@ -495,7 +579,7 @@ internal sealed class CaptureFrame : Form
                 if (inside && !excludedFromCapture)
                     throw new InvalidOperationException(UiText.T("此系統無法隱藏選區內的工具列，請在畫面上方留一點空間後重新選取。", "This system cannot exclude the toolbar from capture. Leave space above the area for the toolbar and select again."));
                 toolbarInsideSelection = inside;
-                MinimumSize = new Size(320, inside ? 128 : 160);
+                MinimumSize = new Size(320, inside ? 128 : 120 + Toolbar + Edge);
                 Bounds = new Rectangle(area.Left - Edge, area.Top - CaptureTopInset, area.Width + Edge * 2, area.Height + CaptureVerticalMargin);
                 tips.SetToolTip(sizeButton, UiText.T("已選取範圍；點擊輸入尺寸或拖曳邊角微調", "Area selected. Click to enter dimensions, or drag edges to adjust."));
             }

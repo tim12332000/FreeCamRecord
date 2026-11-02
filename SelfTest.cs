@@ -171,7 +171,8 @@ internal static class SelfTest
                 var dialog = Application.OpenForms.Cast<Form>().FirstOrDefault(f => f.Text == "錄影尺寸（像素）");
                 if (dialog == null) return;
                 dismiss.Stop();
-                dimensionDialogChecked = dialog.Controls.OfType<NumericUpDown>().All(n => n.Value <= n.Maximum && n.Value >= n.Minimum);
+                var inputs = dialog.Controls.OfType<StudioPanel>().SelectMany(panel => panel.Controls.OfType<NumericUpDown>()).ToArray();
+                dimensionDialogChecked = inputs.Length == 2 && inputs.All(n => n.Value <= n.Maximum && n.Value >= n.Minimum);
                 await CaptureScreenshot(dialog.Bounds, "dimensions.png", frame);
                 dialog.DialogResult = DialogResult.Cancel;
             };

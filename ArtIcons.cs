@@ -3,7 +3,7 @@ using System.Drawing.Imaging;
 
 namespace FreeCamRecord;
 
-internal enum ArtIcon { Menu, Record, Stop, Close, Speaker, Microphone, Folder, Size, Check, Camera, Minimize }
+internal enum ArtIcon { Menu, Record, Stop, Close, Speaker, Microphone, Folder, Size, Check, Camera, Minimize, Scissors, Save, Copy, Maximize, Restore, ChevronUp, ChevronDown }
 
 internal static class ArtIcons
 {
@@ -15,11 +15,23 @@ internal static class ArtIcons
         using var g = Graphics.FromImage(bitmap);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.ScaleTransform(size / 24f, size / 24f);
-        using var pen = new Pen(color, 1.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        using var pen = new Pen(color, 1.65f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
         using var brush = new SolidBrush(color);
         void Line(float x, float y, float x2, float y2) => g.DrawLine(pen, x, y, x2, y2);
         switch (kind)
         {
+            case ArtIcon.ChevronUp:
+                Line(6, 15, 12, 9); Line(12, 9, 18, 15); break;
+            case ArtIcon.ChevronDown:
+                Line(6, 9, 12, 15); Line(12, 15, 18, 9); break;
+            case ArtIcon.Scissors:
+                g.DrawEllipse(pen, 3, 4, 6, 6); g.DrawEllipse(pen, 3, 14, 6, 6);
+                Line(8, 9, 20, 19); Line(8, 15, 20, 5); break;
+            case ArtIcon.Save:
+                g.DrawPolygon(pen, new PointF[] { new(4, 3), new(17, 3), new(21, 7), new(21, 21), new(4, 21) });
+                g.DrawRectangle(pen, 8, 3, 8, 6); g.DrawRectangle(pen, 8, 14, 9, 7); break;
+            case ArtIcon.Copy:
+                g.DrawRectangle(pen, 8, 7, 12, 14); Line(4, 17, 4, 3); Line(4, 3, 16, 3); break;
             case ArtIcon.Camera:
                 g.DrawPolygon(pen, new PointF[] { new(3, 7), new(8, 7), new(10, 4), new(14, 4), new(16, 7), new(21, 7), new(21, 20), new(3, 20) });
                 g.DrawEllipse(pen, 8, 9, 8, 8); break;
@@ -32,7 +44,11 @@ internal static class ArtIcons
             case ArtIcon.Close:
                 Line(6, 6, 18, 18); Line(18, 6, 6, 18); break;
             case ArtIcon.Minimize:
-                Line(5, 16, 19, 16); break;
+                Line(5, 12, 19, 12); break;
+            case ArtIcon.Maximize:
+                g.DrawRectangle(pen, 5, 5, 14, 14); break;
+            case ArtIcon.Restore:
+                g.DrawRectangle(pen, 5, 8, 11, 11); Line(8, 8, 8, 4); Line(8, 4, 20, 4); Line(20, 4, 20, 16); Line(20, 16, 16, 16); break;
             case ArtIcon.Speaker:
                 g.DrawPolygon(pen, new PointF[] { new(4, 9), new(8, 9), new(13, 5), new(13, 19), new(8, 15), new(4, 15) });
                 g.DrawArc(pen, 10, 7, 8, 10, -60, 120); g.DrawArc(pen, 10, 3, 13, 18, -55, 110); break;
