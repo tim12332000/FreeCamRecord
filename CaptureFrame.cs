@@ -37,7 +37,7 @@ internal sealed class Preferences
 internal sealed class CaptureFrame : Form
 {
     internal const int Edge = 4, Toolbar = 36;
-    private readonly Button menuButton = MakeButton(""), selectButton = MakeButton(""), sizeButton = MakeButton(""), photoButton = MakeButton(""), recordButton = MakeButton(""), closeButton = MakeButton("");
+    private readonly Button menuButton = MakeButton(""), selectButton = MakeButton(""), sizeButton = MakeButton(""), photoButton = MakeButton(""), recordButton = MakeButton(""), minimizeButton = MakeButton(""), closeButton = MakeButton("");
     private readonly Dictionary<(ArtIcon Icon, bool Accent), Bitmap> artwork = new();
     private readonly Icon appIcon;
     private readonly ContextMenuStrip menu = new();
@@ -70,6 +70,8 @@ internal sealed class CaptureFrame : Form
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
+        MinimizeBox = true;
+        ShowInTaskbar = true;
         StartPosition = FormStartPosition.Manual;
         MinimumSize = new Size(320, 160);
         TopMost = true;
@@ -78,11 +80,13 @@ internal sealed class CaptureFrame : Form
         Font = new Font("Microsoft JhengHei UI", 9);
         DoubleBuffered = true;
         Bounds = new Rectangle(100, 100, 477 + Edge * 2, 430 + Toolbar + Edge);
-        Controls.AddRange(new Control[] { menuButton, selectButton, sizeButton, photoButton, recordButton, closeButton });
+        Controls.AddRange(new Control[] { menuButton, selectButton, sizeButton, photoButton, recordButton, minimizeButton, closeButton });
         FrameTheme.ApplyButton(recordButton, primary: true);
         menuButton.Image = Artwork(ArtIcon.Menu);
         selectButton.Image = Artwork(ArtIcon.Size);
         closeButton.Image = Artwork(ArtIcon.Close);
+        minimizeButton.Image = Artwork(ArtIcon.Minimize);
+        minimizeButton.ImageAlign = ContentAlignment.MiddleCenter;
         photoButton.Image = Artwork(ArtIcon.Camera);
         photoButton.ImageAlign = ContentAlignment.MiddleCenter;
         menuButton.ImageAlign = selectButton.ImageAlign = closeButton.ImageAlign = ContentAlignment.MiddleCenter;
@@ -98,7 +102,8 @@ internal sealed class CaptureFrame : Form
         photoButton.Click += (_, _) => TakePhoto();
         recordButton.Click += async (_, _) => await ToggleRecording();
         closeButton.Click += (_, _) => Close();
-        timer.Tick += (_, _) => UpdateStatus();
+        minimizeButton.Click += (_, _) => WindowState = FormWindowState.Minimized;
+        timer.Tick += (_, _) => { MaintainTopMost(); UpdateStatus(); };
         timer.Start();
         Resize += (_, _) => UpdateFrame();
         Shown += (_, _) =>
@@ -118,7 +123,7 @@ internal sealed class CaptureFrame : Form
 
     protected override CreateParams CreateParams
     {
-        get { var parameters = base.CreateParams; parameters.ExStyle |= 0x08000000; return parameters; }
+        get { var parameters = base.CreateParams; parameters.ExStyle |= 0x08040000; return parameters; } // NOACTIVATE | APPWINDOW (taskbar restore)
     }
 
     protected override void WndProc(ref Message message)
@@ -142,12 +147,14 @@ internal sealed class CaptureFrame : Form
         photoButton.AccessibleName = UiText.T("拍照", "Take photo");
         recordButton.AccessibleName = session == null ? UiText.T("開始錄影", "Start recording") : UiText.T("停止錄影", "Stop recording");
         closeButton.AccessibleName = UiText.T("關閉", "Close");
+        minimizeButton.AccessibleName = UiText.T("最小化", "Minimize");
         recordButton.Text = session == null ? UiText.T("錄影", "REC") : UiText.T("停止", "Stop");
         tips.SetToolTip(menuButton, UiText.T("聲音、儲存位置、開啟資料夾", "Audio, output folder, language and help"));
         tips.SetToolTip(selectButton, UiText.T("滑鼠指向預選區域；也可直接拖曳框選", "Hover to preview an area, or drag to select"));
         tips.SetToolTip(sizeButton, UiText.T("點擊輸入尺寸；拖曳邊角調整範圍", "Click to enter dimensions; drag edges to resize"));
         tips.SetToolTip(photoButton, UiText.T("拍照：將目前框選範圍儲存為 PNG（錄影中也可使用）", "Take photo: save the selected area as PNG (also available while recording)"));
         tips.SetToolTip(closeButton, UiText.T("關閉；錄影中會先停止並儲存", "Close; an active recording will be stopped and saved first"));
+        tips.SetToolTip(minimizeButton, UiText.T("最小化到工作列；錄影會繼續", "Minimize to taskbar; recording continues"));
         UpdateStatus();
     }
 
@@ -164,6 +171,7 @@ internal sealed class CaptureFrame : Form
 
     private void UpdateFrame()
     {
+        if (WindowState == FormWindowState.Minimized) return;
         if (Width <= 0 || Height <= Toolbar + Edge) return;
         int barOffset = toolbarInsideSelection ? Edge : 0;
         int barHeight = Toolbar + barOffset;
@@ -174,13 +182,17 @@ internal sealed class CaptureFrame : Form
         var previous = Region;
         Region = shape;
         previous?.Dispose();
-        bool showSelector = Width >= 360;
+        bool showSelector = Width >= 396;
         selectButton.Visible = showSelector;
         menuButton.SetBounds(3, barOffset + 2, 32, Toolbar - 4);
         selectButton.SetBounds(38, barOffset + 2, 32, Toolbar - 4);
-        sizeButton.SetBounds(showSelector ? 76 : 38, barOffset + 2, 118, Toolbar - 4);
-        photoButton.SetBounds(Width - 163, barOffset + 2, 32, Toolbar - 4);
-        recordButton.SetBounds(Width - 127, barOffset + 3, 87, Toolbar - 6);
+        int sizeLeft = showSelector ? 76 : 38;
+        int recordWidth = showSelector ? 87 : 75;
+        int recordLeft = Width - 76 - recordWidth;
+        sizeButton.SetBounds(sizeLeft, barOffset + 2, Math.Min(118, recordLeft - 36 - sizeLeft - 4), Toolbar - 4);
+        photoButton.SetBounds(recordLeft - 36, barOffset + 2, 32, Toolbar - 4);
+        recordButton.SetBounds(recordLeft, barOffset + 3, recordWidth, Toolbar - 6);
+        minimizeButton.SetBounds(Width - 72, barOffset + 2, 32, Toolbar - 4);
         closeButton.SetBounds(Width - 36, barOffset + 2, 32, Toolbar - 4);
         savedUntil = DateTime.MinValue;
         UpdateStatus();
@@ -268,6 +280,16 @@ internal sealed class CaptureFrame : Form
         sizeButton.Text = session != null ? $"{session.Elapsed:hh\\:mm\\:ss}" :
             saved ? UiText.T("已儲存", "Saved") : $"{CaptureArea.Width} × {CaptureArea.Height}";
         sizeButton.Image = session != null ? Artwork(ArtIcon.Record, true) : saved ? Artwork(ArtIcon.Check) : null;
+    }
+
+    private void MaintainTopMost()
+    {
+        // Other topmost windows can move above us when activated. Reassert the
+        // overlay's Z order without moving it or taking input from the target.
+        // Leave our own menus and modal dialogs above the toolbar.
+        if (!Visible || IsDisposed || !IsHandleCreated || selecting || menu.Visible ||
+            OwnedForms.Any(form => form.Visible) || WindowState == FormWindowState.Minimized) return;
+        Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013); // HWND_TOPMOST; NOSIZE | NOMOVE | NOACTIVATE
     }
 
     private void ShowMenu()

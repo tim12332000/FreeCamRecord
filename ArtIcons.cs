@@ -3,7 +3,7 @@ using System.Drawing.Imaging;
 
 namespace FreeCamRecord;
 
-internal enum ArtIcon { Menu, Record, Stop, Close, Speaker, Microphone, Folder, Size, Check, Camera }
+internal enum ArtIcon { Menu, Record, Stop, Close, Speaker, Microphone, Folder, Size, Check, Camera, Minimize }
 
 internal static class ArtIcons
 {
@@ -31,6 +31,8 @@ internal static class ArtIcons
                 g.FillRectangle(brush, 5, 5, 14, 14); break;
             case ArtIcon.Close:
                 Line(6, 6, 18, 18); Line(18, 6, 6, 18); break;
+            case ArtIcon.Minimize:
+                Line(5, 16, 19, 16); break;
             case ArtIcon.Speaker:
                 g.DrawPolygon(pen, new PointF[] { new(4, 9), new(8, 9), new(13, 5), new(13, 19), new(8, 15), new(4, 15) });
                 g.DrawArc(pen, 10, 7, 8, 10, -60, 120); g.DrawArc(pen, 10, 3, 13, 18, -55, 110); break;

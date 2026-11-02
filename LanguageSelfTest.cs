@@ -27,10 +27,12 @@ internal static class LanguageSelfTest
                 Check(UiText.IsEnglish == english, "Stored language applied");
                 Check(form.Controls.OfType<Button>().Any(b => b.Text == (english ? "REC" : "錄影")), "Record button translated");
                 Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Take photo" : "拍照") && b.Image != null), "Photo button translated and has an icon");
-                foreach (int width in new[] { 320, 359, 360, 485 })
+                Check(form.Controls.OfType<Button>().Any(b => b.AccessibleName == (english ? "Minimize" : "最小化") && b.Image != null), "Minimize button translated and has an icon");
+                Check(form.ShowInTaskbar && form.MinimizeBox, "Minimized frame remains available in taskbar");
+                foreach (int width in new[] { 320, 359, 360, 395, 396, 485 })
                 {
                     form.Width = width;
-                    var toolbar = form.Controls.OfType<Button>().Where(b => b.Width > 0 && (b.AccessibleName != (english ? "Select recording area" : "選取錄製區域") || width >= 360)).ToArray();
+                    var toolbar = form.Controls.OfType<Button>().Where(b => b.Width > 0 && (b.AccessibleName != (english ? "Select recording area" : "選取錄製區域") || width >= 396)).ToArray();
                     foreach (var button in toolbar)
                     {
                         Check(button.Left >= 0 && button.Right <= form.Width, "Toolbar button stays inside frame");

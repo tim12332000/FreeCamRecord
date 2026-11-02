@@ -11,13 +11,14 @@ internal static class SelfTest
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out RectangleRaw rectangle);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     [StructLayout(LayoutKind.Sequential)] private struct RectangleRaw { public int Left, Top, Right, Bottom; public override string ToString() => $"{Left},{Top},{Right},{Bottom}"; }
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     private static readonly List<string> results = new();
     private static string directory = "";
     private static int exitCode;
 
-    internal static int Run(bool mediaOnly = false, bool photosOnly = false)
+    internal static int Run(bool mediaOnly = false, bool photosOnly = false, bool frameOnly = false)
     {
         directory = Path.Combine(Environment.CurrentDirectory, ".omx", "verification", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(directory);
@@ -27,7 +28,8 @@ internal static class SelfTest
         {
             try
             {
-                if (photosOnly) await ExercisePhotos(frame);
+                if (frameOnly) await ExerciseTopMost(frame);
+                else if (photosOnly) await ExercisePhotos(frame);
                 else if (mediaOnly)
                 {
                     using var pattern = new TestPattern { Bounds = frame.CaptureArea, TopMost = true };
@@ -80,6 +82,40 @@ internal static class SelfTest
         await Task.Delay(120);
     }
 
+    private static async Task ExerciseTopMost(CaptureFrame frame)
+    {
+        bool IsAbove(IntPtr upper, IntPtr lower)
+        {
+            for (var window = GetWindow(lower, 3); window != IntPtr.Zero; window = GetWindow(window, 3))
+                if (window == upper) return true;
+            return false;
+        }
+        using var target = new Form { Text = "Overlay stacking test", Bounds = frame.Bounds, TopMost = true };
+        var bounds = frame.Bounds;
+        target.Show();
+        await Task.Delay(300);
+        target.Activate();
+        Native.SetForegroundWindow(target.Handle);
+        await Task.Delay(100);
+        Require(Native.SetWindowPos(target.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013), "raise competing topmost window");
+        Require(IsAbove(target.Handle, frame.Handle), "competing window initially covers overlay");
+        var foreground = Native.GetForegroundWindow();
+        Require(foreground != frame.Handle, "overlay does not own keyboard focus");
+        await Task.Delay(750);
+        Require(IsAbove(frame.Handle, target.Handle), "overlay recovers topmost position");
+        Require(Native.GetForegroundWindow() == foreground, "overlay recovery preserves foreground handle");
+        if (foreground == IntPtr.Zero) results.Add("NOT TESTED: application keyboard focus (test desktop has no foreground window)");
+        Require(frame.Bounds == bounds, "overlay recovery preserves capture bounds");
+        Require(frame.ShowInTaskbar && frame.MinimizeBox, "frame supports minimizing to taskbar");
+        var minimize = frame.Controls.OfType<Button>().Single(b => b.AccessibleName == "最小化");
+        typeof(Button).GetMethod("OnClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(minimize, new object[] { EventArgs.Empty });
+        await Task.Delay(600);
+        Require(frame.WindowState == FormWindowState.Minimized, "minimize button keeps frame minimized despite topmost timer");
+        frame.WindowState = FormWindowState.Normal;
+        await Task.Delay(600);
+        Require(frame.Bounds == bounds, "restoring from taskbar preserves capture bounds");
+        Require(IsAbove(frame.Handle, target.Handle), "restored frame returns above target");
+    }
     private static async Task ExercisePhotos(CaptureFrame frame)
     {
         var area = frame.CaptureArea;
@@ -102,6 +138,7 @@ internal static class SelfTest
     private static async Task Exercise(CaptureFrame frame, Preferences preferences)
     {
         await Task.Delay(300);
+        await ExerciseTopMost(frame);
         await CaptureScreenshot(frame.Bounds, "initial.png", frame);
         GetWindowRect(frame.Handle, out var native); results.Add($"NATIVE BOUNDS: {native}");
         var old = frame.Bounds;
@@ -169,6 +206,8 @@ internal static class SelfTest
         var record = frame.Controls.OfType<Button>().Single(b => b.AccessibleName == "開始錄影");
         record.PerformClick();
         await WaitUntil(() => record.Text.Contains("停止") && record.Enabled, "start recording");
+        await ExerciseTopMost(frame);
+        Require(record.Text.Contains("停止") && record.Enabled, "minimize and restore preserves active recording");
         CheckPhoto(frame, area.Size);
         Require(record.Text.Contains("停止") && record.Enabled, "taking a photo preserves active recording");
         await CaptureScreenshot(frame.Bounds, "recording.png", frame);
